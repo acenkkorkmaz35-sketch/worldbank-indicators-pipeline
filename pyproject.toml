@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wb-pipeline"
+version = "0.1.0"
+description = "Config-driven, idempotent World Bank indicators pipeline (Python ingestion + dbt on DuckDB)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31,<3",
+    "pyyaml>=6,<7",
+    "pydantic>=2.5,<3",
+    "duckdb>=1.1",
+    "dbt-core>=1.10,<1.11",
+    "dbt-duckdb>=1.10,<1.11",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+wb-pipeline = "wb_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = ["integration: runs dbt end-to-end against a temporary DuckDB file (offline)"]

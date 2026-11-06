@@ -1,0 +1,36 @@
+name: wb_indicators
+version: "0.1.0"
+config-version: 2
+profile: wb_indicators
+
+model-paths: ["models"]
+snapshot-paths: ["snapshots"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages", "logs"]
+
+vars:
+  # Overridden at runtime from config/pipeline.yml (quality.gdp_per_capita_tolerance).
+  gdp_per_capita_tolerance: 0.005
+
+models:
+  wb_indicators:
+    staging:
+      +schema: staging
+      +materialized: view
+    core:
+      +schema: core
+      +materialized: table
+    reporting:
+      +schema: reporting
+      +materialized: view
+
+snapshots:
+  wb_indicators:
+    +schema: snapshots
+
+data_tests:
+  wb_indicators:
+    +store_failures: true     # failing rows land in schema dq_failures for inspection
+    +schema: dq_failures

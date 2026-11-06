@@ -1,0 +1,8 @@
+wb_indicators:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      # Set by the CLI from config/pipeline.yml (or WB_DUCKDB_PATH); default for ad-hoc dbt use.
+      path: "{{ env_var('WB_DUCKDB_PATH', '../data/warehouse.duckdb') }}"
+      threads: 4

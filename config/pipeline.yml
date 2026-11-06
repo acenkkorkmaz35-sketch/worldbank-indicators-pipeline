@@ -1,0 +1,67 @@
+# Single source of truth for pipeline scope.
+# Adding a country or an indicator is a config change only: the ingestion writes
+# this scope into the warehouse (meta.* tables) and every dbt model reads it from there.
+
+source:
+  base_url: https://api.worldbank.org/v2
+  per_page: 1000            # API max page size; paging is still handled for larger scopes
+  timeout_seconds: 30
+  max_retries: 5            # retries for timeouts, connection errors, HTTP 429/5xx, malformed bodies
+  backoff_seconds: 1.0      # exponential backoff base: 1s, 2s, 4s, ... (+ jitter)
+
+scope:
+  years:
+    start: 2018
+    end: 2024
+
+  countries:                # ISO 3166-1 alpha-3 codes
+    - BRA
+    - CAN
+    - DEU
+    - GBR
+    - IND
+    - JPN
+    - MEX
+    - USA
+    - ZAF
+
+  indicators:
+    # aggregation tells the reporting layer how to roll the indicator up to income groups
+    # without "averaging averages":
+    #   sum            -> sum of country values
+    #   ratio          -> sum(numerator) / sum(denominator)
+    #   weighted_avg   -> sum(value * weight) / sum(weight)
+    # valid_range is enforced by a data-quality test (inclusive bounds, null = unbounded).
+    - code: SP.POP.TOTL
+      short_name: population
+      unit: people
+      aggregation: {method: sum}
+      valid_range: {min: 1, max: 2000000000}
+
+    - code: NY.GDP.MKTP.CD
+      short_name: gdp_usd
+      unit: current USD
+      aggregation: {method: sum}
+      valid_range: {min: 0, max: null}
+
+    - code: NY.GDP.PCAP.CD
+      short_name: gdp_per_capita_usd
+      unit: current USD per person
+      aggregation: {method: ratio, numerator: NY.GDP.MKTP.CD, denominator: SP.POP.TOTL}
+      valid_range: {min: 0, max: 500000}
+
+    - code: SP.DYN.LE00.IN
+      short_name: life_expectancy_years
+      unit: years
+      aggregation: {method: weighted_avg, weight: SP.POP.TOTL}
+      valid_range: {min: 20, max: 100}
+
+quality:
+  # GDP per capita must reconcile with GDP / population within this relative tolerance.
+  gdp_per_capita_tolerance: 0.005
+
+warehouse:
+  path: data/warehouse.duckdb   # relative to the repo root unless absolute; override with WB_DUCKDB_PATH
+
+output:
+  dir: output                   # reporting CSV exports
