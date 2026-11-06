@@ -421,16 +421,30 @@ Clustering is unnecessary at this volume. At scale, cluster the fact table on
 
 ## AI usage
 
-This project was built in a pair-programming session with **Claude Code** (Anthropic).
+This project was built end to end, from reading the brief to the final review, with **Claude
+Code** (Anthropic) as a pair programmer. It was a collaboration, not a hand-off: at each step
+the options and their trade-offs were discussed and the decisions were made together. Examples:
+- **Stack.** Plain Python + SQL was weighed against dbt on DuckDB. dbt was chosen to match
+  the target role (grain, MERGE patterns, snapshots, tests), at the cost of a heavier install.
+- **Data model and load pattern.** A full rebuild was weighed against an incremental MERGE on
+  the business key. MERGE was chosen to make idempotency and late/corrected data explicit and
+  testable.
+- **Ambiguous parts of the brief.** Each one was resolved deliberately and documented:
+  - what counts as "missing" vs "incomplete"
+  - the two readings of "latest available year"
+  - strict vs gap-tolerant YoY
+  - current-only income classification
+  - ratio-of-sums aggregation instead of averaging averages
+- **Scope.** Work was prioritised in the order the brief suggests, and the optional items
+  were kept out until the core was correct.
 
 AI was used to:
 - probe the live API and surface its quirks (errors returned with HTTP 200, padded labels)
 - scaffold the package, dbt project and tests
 - draft documentation
+- run a final review against the brief, done the way a reviewer would
 
-Design choices were discussed and steered explicitly; the job description's emphasis on grain,
-MERGE patterns, late data and testing shaped the scope. The principle was: **don't trust,
-verify**:
+The working principle was: **don't trust, verify**:
 - Every behavioural claim in this README is backed by a test or by a run against the live API.
   Examples: zero-row reruns, exact GDP-per-capita reconciliation, live paging.
 - Two real defects were caught this way during development:
