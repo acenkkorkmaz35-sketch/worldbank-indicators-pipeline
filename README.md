@@ -35,16 +35,20 @@ runs the pipeline:
 3. **export:** CSVs and `_manifest.json` in [`output/`](output/)
 
 Running it again is safe. Unchanged source data creates no new payloads and changes no rows.
+The committed sample in `output/` is regenerated on every run. With unchanged source data the
+CSVs come out byte-identical; only `output/_manifest.json` changes, because it records the new
+run id and timestamp.
 The warehouse is the file `data/warehouse.duckdb`; you can query it with the DuckDB CLI or any
 DuckDB client.
 
 The same entry point runs everything else. No virtualenv activation is needed:
 
 ```bash
-python run.py test        # 49 offline tests (all network access is blocked in tests)
+python run.py test        # 52 offline tests (all network access is blocked in tests)
 python run.py lint        # ruff check + format check
 python run.py ingest      # API -> raw only
 python run.py transform   # rebuild everything from raw, no API calls (replay)
+python run.py transform --full-refresh   # ... also rebuilding the MERGE-loaded fact from scratch
 python run.py export      # reporting views -> CSV
 python run.py docs        # dbt docs + lineage graph on http://localhost:8080
 ```
@@ -271,10 +275,18 @@ Only countries with every input present contribute, and `countries_contributing`
 35,287 USD as a naive average of the nine country values.
 
 **10. Adding a country or indicator is a config change only.**
-Edit `config/pipeline.yml`:
+Edit `config/pipeline.yml`, then run `python run.py`:
 - Add an ISO3 code under `countries`, or
 - Add an indicator block with `code`, `short_name`, `unit`, `aggregation`, and optionally
-  `valid_range` and `max_abs_yoy_change`.
+  `valid_range` and `max_abs_yoy_change`. For example:
+
+```yaml
+    - code: SP.URB.TOTL.IN.ZS              # urban population, % of total
+      short_name: urban_population_pct
+      unit: "% of population"
+      aggregation: {method: weighted_avg, weight: SP.POP.TOTL}
+      valid_range: {min: 0, max: 100}
+```
 
 The ingestion mirrors the scope into `meta.scope_*` and every model, test and report picks it up.
 A new `ratio` indicator is automatically covered by the reconciliation test. Removing an item
@@ -306,7 +318,7 @@ then no CSVs are exported.
 
 The outcome of each test is exported to [`output/dq_test_results.csv`](output/dq_test_results.csv).
 
-**pytest (49 tests, offline).**
+**pytest (52 tests, offline).**
 [`tests/fake_api.py`](tests/fake_api.py) is an in-memory World Bank API that uses the real wire
 format. It honours `per_page`/`page` and can script failures. An autouse fixture blocks every outbound socket, so a test that tried to reach the internet would fail.
 
@@ -315,9 +327,9 @@ format. It honours `per_page`/`page` and can script failures. An autouse fixture
 | `test_api_client.py` | paging across 5 pages; deterministic URLs; HTTP-200 error envelopes; retry with exponential backoff; give-up after max retries; 4xx fail-fast; row-count reconciliation; paging metadata changing mid-request; empty results |
 | `test_config.py` | validation of codes, year ranges, aggregation references, unknown keys |
 | `test_ingest.py` | unchanged rerun stores no new payloads; a revision is stored as a new version; a failed run leaves no partial request and is recorded |
-| `test_cli.py` | exit codes (0 ok / 1 DQ / 2 usage / 3 source); unreachable source → run recorded as failed, nothing published |
+| `test_cli.py` | every exit code: 0 (run publishes CSVs, manifest, star schema), 1 (a failing DQ test publishes nothing), 2 (bad config, transform before ingest), 3 (unreachable source, run recorded as failed); `transform --full-refresh` replays from raw without calling the API |
 | `test_powerbi_model.py` | Power BI model ↔ export contract: every model column exists in the exported CSV (same order), relationships hit real columns, measures reference only model objects, project JSON is valid, TMDL uses tabs; regressions for the two Desktop-only issues (reserved DAX variable names, shared M function) |
-| `test_pipeline_e2e.py` (runs real dbt against a temp DuckDB) | **idempotent rerun (zero rows touched)**; null vs not-returned semantics; zero prior → NULL pct; **late value + revision → MERGE touches exactly 2 rows, snapshot and revisions report capture both**; value withdrawn → `not_returned_by_source` + audited; no resurrection after a scope change; inconsistent GDP per capita, out-of-range values and a tampered raw payload **fail the build**; component gap → warning; add/remove a country and add an indicator via config; CSV export + manifest + lineage |
+| `test_pipeline_e2e.py` (runs real dbt against a temp DuckDB) | **idempotent rerun (zero rows touched)**; null vs not-returned semantics; zero prior → NULL pct; **late value + revision → MERGE touches exactly 2 rows, snapshot and revisions report capture both**; value withdrawn → `not_returned_by_source` + audited; no resurrection after a scope change; inconsistent GDP per capita, out-of-range values and a tampered raw payload **fail the build**; component gap → warning; add/remove a country and add an indicator via config; an indicator with no data stays visible as missing in every report; CSV export + manifest + lineage |
 
 ---
 
@@ -421,6 +433,9 @@ regression tests in `test_powerbi_model.py`:
   is not fetched from 2017, so the dataset stays strictly within the requested years.
 - **Units:** taken from config, because the API's `unit` field is empty for these indicators.
   Values are kept at full precision; `decimal` from the API is retained.
+- **Scope changes take effect on ingest:** the ingestion writes the configured scope into
+  `meta.scope_*`. After editing `config/pipeline.yml`, run `python run.py`, not only
+  `transform`; `transform` rebuilds from raw for the scope of the last successful ingestion.
 - **Revisions:** a re-published *identical* value is not a change. The fact row keeps pointing at
   the original response, which still contains that value.
 
@@ -440,7 +455,7 @@ regression tests in `test_powerbi_model.py`:
   builds fully offline.
 - **Snapshot granularity:** history is only as fine as the run cadence. A change and its
   reversal between two runs is not seen. Raw payloads still allow reconstruction.
-- **Integration tests run real dbt (about 2 minutes):** slower than mocks, but they test the
+- **Integration tests run real dbt (about 3 minutes):** slower than mocks, but they test the
   actual SQL.
 
 ---
@@ -502,7 +517,7 @@ regression tests in `test_powerbi_model.py`:
 | Snapshot | dbt snapshot (or Streams → SCD2 table) + Time Travel | Delta time travel |
 | Scheduling | MWAA (Airflow) or Dagster; Snowflake Tasks for in-warehouse steps | ADF / Fabric pipelines |
 | Compute | XS warehouse, `AUTO_SUSPEND=60`; separate transform and BI warehouses; resource monitors for cost | — |
-| Reporting | The `core` star (dim_country, dim_indicator, fct) maps directly to a Power BI model (import mode); `reporting` views for ad-hoc SQL | Power BI / Fabric |
+| Reporting | The `powerbi/` semantic model points at Snowflake instead of CSVs (import or DirectQuery); `reporting` views for ad-hoc SQL | Power BI / Fabric |
 
 Clustering is unnecessary at this volume. At scale, cluster the fact table on
 `(indicator_code, year)` to match the dominant filters.

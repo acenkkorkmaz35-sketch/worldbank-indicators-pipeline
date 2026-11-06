@@ -3,6 +3,7 @@
     wb-pipeline run        # ingest -> dbt build (models, snapshot, DQ tests) -> CSV export
     wb-pipeline ingest     # API -> raw layer only
     wb-pipeline transform  # dbt build only (re-processes raw without calling the API)
+                           #   --full-refresh: also rebuild the MERGE-loaded fact from scratch
     wb-pipeline export     # reporting views -> CSV
 
 Exit codes: 0 ok · 1 data-quality / dbt failure · 2 usage or config error · 3 source (API) failure
@@ -51,8 +52,8 @@ def _require_ingested(cfg: PipelineConfig) -> None:
         raise UsageError("no successful ingestion run in the warehouse - run `python run.py ingest` first")
 
 
-def _transform(cfg: PipelineConfig) -> bool:
-    result = run_dbt_build(cfg)
+def _transform(cfg: PipelineConfig, full_refresh: bool = False) -> bool:
+    result = run_dbt_build(cfg, ["--full-refresh"] if full_refresh else None)
     export_dq_results(result.tests, cfg.output_dir)
     failed = [t for t in result.tests if t.status in ("fail", "error")]
     warned = [t for t in result.tests if t.status == "warn"]
@@ -68,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("command", choices=["run", "ingest", "transform", "export"])
     parser.add_argument("--config", help="path to pipeline YAML (default: config/pipeline.yml)")
+    parser.add_argument(
+        "--full-refresh",
+        action="store_true",
+        help="rebuild incremental models (the MERGE-loaded fact) from scratch; raw holds everything",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -82,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
             run_ingestion(cfg)
         else:
             _require_ingested(cfg)
-        if args.command in ("run", "transform") and not _transform(cfg):
+        if args.command in ("run", "transform") and not _transform(cfg, args.full_refresh):
             log.error(
                 "dbt build failed - reporting outputs were NOT refreshed; "
                 "failing rows are in schema dq_failures (see output/dq_test_results.csv)"

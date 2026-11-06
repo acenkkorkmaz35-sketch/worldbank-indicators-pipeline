@@ -14,6 +14,7 @@ Other commands go through the same entry point:
     python run.py lint         # ruff check + format check
     python run.py ingest       # API -> raw layer only
     python run.py transform    # dbt build only: rebuild everything from raw, no API calls
+                               #   (add --full-refresh to rebuild the MERGE-loaded fact too)
     python run.py export       # reporting views -> CSV
     python run.py docs         # dbt docs + lineage graph on http://localhost:8080
 """

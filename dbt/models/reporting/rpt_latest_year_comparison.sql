@@ -42,10 +42,16 @@ own_latest as (
     group by country_iso3, indicator_code
 ),
 
+-- every (indicator, country) pair gets a row, even for an indicator with no data at all
+-- (latest_year is then NULL): missing data stays visible instead of silently dropping out
+pairs as (
+    select distinct indicator_code, country_iso3 from f
+),
+
 base as (
     select
-        f_latest.indicator_code,
-        f_latest.country_iso3,
+        pr.indicator_code,
+        pr.country_iso3,
         p.latest_year,
         f_latest.value                                       as value_at_latest_year,
         f_latest.source_response_id                          as source_response_id_at_latest_year,
@@ -54,19 +60,22 @@ base as (
         f_complete.source_response_id                        as source_response_id_at_latest_complete_year,
         o.own_latest_year,
         o.own_latest_value
-    from per_indicator as p
-    inner join f as f_latest
-        on f_latest.indicator_code = p.indicator_code
+    from pairs as pr
+    left join per_indicator as p
+        on p.indicator_code = pr.indicator_code
+    left join f as f_latest
+        on f_latest.indicator_code = pr.indicator_code
+       and f_latest.country_iso3 = pr.country_iso3
        and f_latest.year = p.latest_year
     left join complete_years as cy
-        on cy.indicator_code = p.indicator_code
+        on cy.indicator_code = pr.indicator_code
     left join f as f_complete
-        on f_complete.indicator_code = p.indicator_code
-       and f_complete.country_iso3 = f_latest.country_iso3
+        on f_complete.indicator_code = pr.indicator_code
+       and f_complete.country_iso3 = pr.country_iso3
        and f_complete.year = cy.latest_complete_year
     left join own_latest as o
-        on o.indicator_code = p.indicator_code
-       and o.country_iso3 = f_latest.country_iso3
+        on o.indicator_code = pr.indicator_code
+       and o.country_iso3 = pr.country_iso3
 )
 
 select

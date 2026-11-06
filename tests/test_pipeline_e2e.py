@@ -344,3 +344,34 @@ def test_export_writes_manifest_linking_files_to_run(cfg, fake_api, tmp_path):
         )[0][0]
         == 0
     )
+
+
+def test_indicator_without_any_data_stays_visible_in_every_report(tmp_path):
+    # An indicator the source has nothing for must show up as missing, not disappear.
+    empty = {
+        "code": "SP.URB.TOTL.IN.ZS",
+        "short_name": "urban_population_pct",
+        "unit": "% of population",
+        "aggregation": {"method": "weighted_avg", "weight": "SP.POP.TOTL"},
+    }
+    cfg = make_config(tmp_path, extra_indicators=[empty])
+    result = run_all(
+        cfg, FakeWorldBank(observations=base_observations(["BRA", "IND", "USA"], range(2021, 2024))), tmp_path
+    )
+    assert result.success, failing(result)
+
+    assert query(
+        cfg,
+        """select count(*), count(latest_year), bool_and(missing_at_latest_year)
+                        from reporting.rpt_latest_year_comparison where indicator_code = 'SP.URB.TOTL.IN.ZS'""",
+    )[0] == (3, 0, True)
+    assert query(
+        cfg,
+        """select distinct coverage_status from reporting.rpt_coverage_summary
+                        where indicator_code = 'SP.URB.TOTL.IN.ZS'""",
+    ) == [("empty",)]
+    assert query(
+        cfg,
+        """select count(*), min(gap_type), max(gap_type) from reporting.rpt_missing_data
+                        where indicator_code = 'SP.URB.TOTL.IN.ZS'""",
+    )[0] == (9, "no_data_in_scope", "no_data_in_scope")
