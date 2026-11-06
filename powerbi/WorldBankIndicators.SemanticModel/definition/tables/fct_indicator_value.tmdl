@@ -1,0 +1,139 @@
+/// Grain: one row per country x indicator x year in scope, including missing combinations (value blank, is_missing true, missing_reason set). source_response_id points at the raw API payload.
+table fct_indicator_value
+
+	/// Value of the selected indicator, aggregated with its configured rule: sum (population, GDP), ratio of sums (GDP per capita = sum GDP / sum population) or population-weighted mean (life expectancy). Only country-years with every input present contribute. Blank when more than one indicator is in context - values of different indicators are never added up.
+	measure 'Indicator Value' =
+			VAR method = SELECTEDVALUE ( dim_indicator[aggregation_method] )
+			VAR numCode = SELECTEDVALUE ( dim_indicator[numerator_code] )
+			VAR denCode = SELECTEDVALUE ( dim_indicator[denominator_code] )
+			VAR wCode = SELECTEDVALUE ( dim_indicator[weight_code] )
+			VAR cells =
+			    ADDCOLUMNS (
+			        CROSSJOIN ( VALUES ( dim_country[country_iso3] ), VALUES ( dim_year[year] ) ),
+			        "@v", CALCULATE ( SUM ( fct_indicator_value[value] ) ),
+			        "@num", IF ( method = "ratio", CALCULATE ( SUM ( fct_indicator_value[value] ), REMOVEFILTERS ( dim_indicator ), dim_indicator[indicator_code] = numCode ) ),
+			        "@den", IF ( method = "ratio", CALCULATE ( SUM ( fct_indicator_value[value] ), REMOVEFILTERS ( dim_indicator ), dim_indicator[indicator_code] = denCode ) ),
+			        "@w", IF ( method = "weighted_avg", CALCULATE ( SUM ( fct_indicator_value[value] ), REMOVEFILTERS ( dim_indicator ), dim_indicator[indicator_code] = wCode ) )
+			    )
+			VAR ratioCells = FILTER ( cells, NOT ISBLANK ( [@num] ) && NOT ISBLANK ( [@den] ) && [@den] <> 0 )
+			VAR weightedCells = FILTER ( cells, NOT ISBLANK ( [@v] ) && NOT ISBLANK ( [@w] ) && [@w] > 0 )
+			RETURN
+			    SWITCH (
+			        method,
+			        "sum", SUMX ( cells, [@v] ),
+			        "ratio", DIVIDE ( SUMX ( ratioCells, [@num] ), SUMX ( ratioCells, [@den] ) ),
+			        "weighted_avg", DIVIDE ( SUMX ( weightedCells, [@v] * [@w] ), SUMX ( weightedCells, [@w] ) )
+			    )
+		formatString: #,0.00
+		displayFolder: Indicators
+
+	/// Plain average of the country values (for comparison with [Indicator Value]; averaging averages is usually wrong).
+	measure 'Simple Average' = IF ( HASONEVALUE ( dim_indicator[indicator_code] ), AVERAGE ( fct_indicator_value[value] ) )
+		formatString: #,0.00
+		displayFolder: Indicators
+
+	/// Strict year-over-year change vs year - 1 of [Indicator Value]. Blank when either year is missing or the prior value is 0.
+	measure 'YoY %' =
+			VAR y = SELECTEDVALUE ( dim_year[year] )
+			VAR cur = [Indicator Value]
+			VAR prev = CALCULATE ( [Indicator Value], dim_year[year] = y - 1 )
+			RETURN
+			    IF ( NOT ISBLANK ( y ) && NOT ISBLANK ( cur ) && NOT ISBLANK ( prev ) && prev <> 0, DIVIDE ( cur - prev, ABS ( prev ) ) )
+		formatString: 0.0%
+		displayFolder: Indicators
+
+	/// Countries with a value in the current context.
+	measure 'Countries Reporting' = CALCULATE ( DISTINCTCOUNT ( fct_indicator_value[country_iso3] ), fct_indicator_value[is_missing] = FALSE () )
+		formatString: 0
+		displayFolder: Coverage
+
+	/// Country x indicator x year combinations without a value (null in source or not returned).
+	measure 'Missing Combinations' = CALCULATE ( COUNTROWS ( fct_indicator_value ), fct_indicator_value[is_missing] = TRUE () ) + 0
+		formatString: 0
+		displayFolder: Coverage
+
+	/// Share of expected combinations that have a value.
+	measure 'Completeness %' = DIVIDE ( COUNTROWS ( fct_indicator_value ) - [Missing Combinations], COUNTROWS ( fct_indicator_value ) )
+		formatString: 0.0%
+		displayFolder: Coverage
+
+	/// Most recent year with a value in the current context.
+	measure 'Latest Year With Data' = CALCULATE ( MAX ( fct_indicator_value[year] ), fct_indicator_value[is_missing] = FALSE () )
+		formatString: 0
+		displayFolder: Coverage
+
+	column indicator_value_id
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: indicator_value_id
+
+	column country_iso3
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: country_iso3
+
+	column indicator_code
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: indicator_code
+
+	column year
+		dataType: int64
+		isHidden
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: year
+
+	/// Raw value; use [Indicator Value] instead.
+	column value
+		dataType: double
+		isHidden
+		summarizeBy: none
+		sourceColumn: value
+
+	column is_missing
+		dataType: boolean
+		summarizeBy: none
+		sourceColumn: is_missing
+
+	column missing_reason
+		dataType: string
+		summarizeBy: none
+		sourceColumn: missing_reason
+
+	column obs_status
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: obs_status
+
+	/// Source release date (lastupdated) of the payload.
+	column source_last_updated
+		dataType: string
+		summarizeBy: none
+		sourceColumn: source_last_updated
+
+	/// raw.api_response.response_id of the exact payload.
+	column source_response_id
+		dataType: string
+		summarizeBy: none
+		sourceColumn: source_response_id
+
+	/// Exact API URL (incl. page) the value came from.
+	column source_request_url
+		dataType: string
+		summarizeBy: none
+		sourceColumn: source_request_url
+
+	partition fct_indicator_value = m
+		mode: import
+		source =
+				let
+				    Source = WbCsv("fct_indicator_value.csv"),
+				    Typed = Table.TransformColumnTypes(Source, {{"year", Int64.Type}, {"value", type number}, {"is_missing", type logical}}, "en-US")
+				in
+				    Typed
+

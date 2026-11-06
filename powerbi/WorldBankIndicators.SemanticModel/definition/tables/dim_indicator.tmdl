@@ -1,0 +1,86 @@
+/// One row per indicator in scope (business key indicator_code), incl. the config-driven aggregation rule.
+table dim_indicator
+
+	/// World Bank indicator code (business key).
+	column indicator_code
+		dataType: string
+		summarizeBy: none
+		sourceColumn: indicator_code
+
+	column short_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: short_name
+		sortByColumn: sort_order
+
+	column indicator_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: indicator_name
+
+	column unit
+		dataType: string
+		summarizeBy: none
+		sourceColumn: unit
+
+	/// sum | ratio | weighted_avg - used by [Indicator Value].
+	column aggregation_method
+		dataType: string
+		summarizeBy: none
+		sourceColumn: aggregation_method
+
+	column numerator_code
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: numerator_code
+
+	column denominator_code
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: denominator_code
+
+	column weight_code
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: weight_code
+
+	column valid_min
+		dataType: double
+		isHidden
+		summarizeBy: none
+		sourceColumn: valid_min
+
+	column valid_max
+		dataType: double
+		isHidden
+		summarizeBy: none
+		sourceColumn: valid_max
+
+	column source_organization
+		dataType: string
+		summarizeBy: none
+		sourceColumn: source_organization
+
+	column definition
+		dataType: string
+		summarizeBy: none
+		sourceColumn: definition
+
+	column sort_order
+		dataType: int64
+		isHidden
+		summarizeBy: none
+		sourceColumn: sort_order
+
+	partition dim_indicator = m
+		mode: import
+		source =
+				let
+				    Source = WbCsv("dim_indicator.csv"),
+				    Typed = Table.TransformColumnTypes(Source, {{"valid_min", type number}, {"valid_max", type number}, {"sort_order", Int64.Type}}, "en-US")
+				in
+				    Typed
+

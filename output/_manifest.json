@@ -1,5 +1,5 @@
 {
-  "exported_at": "2026-11-06T09:03:20+00:00",
+  "exported_at": "2026-11-06T10:56:39+00:00",
   "ingestion_run_id": "20261106T090303Z-bf7bca7c",
   "ingestion_started_at": "2026-11-06T11:03:03.855863+02:00",
   "config_fingerprint": "6ecbbf0a9568b2a86b6990c3a3218a4baff1385dd2b0ffc824e21a043f6864a7",
@@ -27,6 +27,18 @@
     },
     "rpt_source_revisions.csv": {
       "rows": 0
+    },
+    "powerbi/dim_country.csv": {
+      "rows": 9
+    },
+    "powerbi/dim_indicator.csv": {
+      "rows": 4
+    },
+    "powerbi/dim_year.csv": {
+      "rows": 7
+    },
+    "powerbi/fct_indicator_value.csv": {
+      "rows": 252
     }
   },
   "lineage_hint": "source_response_id columns -> raw.api_response.response_id (exact payload + request_url)"

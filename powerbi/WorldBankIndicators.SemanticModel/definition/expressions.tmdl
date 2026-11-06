@@ -1,0 +1,17 @@
+/// Folder or URL that holds the star-schema CSVs written by `python run.py` (output/powerbi/).
+/// Default: the sample committed to the public GitHub repo, so the model opens anywhere.
+/// After a local run, set it to the local folder, e.g. C:\code\worldbank-indicators-pipeline\output\powerbi\ (keep the trailing slash).
+expression DataFolder = "https://raw.githubusercontent.com/acenkkorkmaz35-sketch/worldbank-indicators-pipeline/main/output/powerbi/" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	annotation PBI_ResultType = Text
+
+/// Reads one exported CSV from DataFolder (URL or local folder); empty strings become nulls.
+expression WbCsv =
+		(fileName as text) as table =>
+		let
+		    Raw = if Text.StartsWith(DataFolder, "http") then Web.Contents(DataFolder & fileName) else File.Contents(DataFolder & fileName),
+		    Parsed = Csv.Document(Raw, [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+		    Promoted = Table.PromoteHeaders(Parsed, [PromoteAllScalars = true]),
+		    Blanks = Table.TransformColumns(Promoted, List.Transform(Table.ColumnNames(Promoted), (c) => {c, each if _ = "" then null else _}))
+		in
+		    Blanks
+	annotation PBI_ResultType = Function

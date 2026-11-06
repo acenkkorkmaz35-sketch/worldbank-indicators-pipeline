@@ -1,0 +1,11 @@
+relationship fct_indicator_value_country
+	fromColumn: fct_indicator_value.country_iso3
+	toColumn: dim_country.country_iso3
+
+relationship fct_indicator_value_indicator
+	fromColumn: fct_indicator_value.indicator_code
+	toColumn: dim_indicator.indicator_code
+
+relationship fct_indicator_value_year
+	fromColumn: fct_indicator_value.year
+	toColumn: dim_year.year

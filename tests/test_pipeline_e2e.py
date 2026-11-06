@@ -329,6 +329,10 @@ def test_export_writes_manifest_linking_files_to_run(cfg, fake_api, tmp_path):
     assert manifest["ingestion_run_id"] == run_id
     assert manifest["source_last_updated_by_indicator"]["SP.POP.TOTL"] == "2026-10-08"
     assert manifest["files"]["rpt_yoy_change.csv"]["rows"] == 36
+    # star schema for the Power BI model
+    assert manifest["files"]["powerbi/fct_indicator_value.csv"]["rows"] == 36
+    assert manifest["files"]["powerbi/dim_country.csv"]["rows"] == 3
+    assert manifest["files"]["powerbi/dim_year.csv"]["rows"] == 3
 
     # every reported value carries the id of the exact raw payload it came from
     assert (

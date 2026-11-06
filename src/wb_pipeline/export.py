@@ -25,6 +25,27 @@ REPORTS: dict[str, str] = {
     "rpt_source_revisions": "indicator_code, country_iso3, year, changed_at",
 }
 
+# Star schema for BI tools (powerbi/ semantic model), one CSV per table. Explicit column lists:
+# BI-friendly types only (no JSON, no tz-aware timestamps), stable order for clean diffs.
+BI_TABLES: dict[str, str] = {
+    "dim_country": """
+        select country_iso3, country_iso2, country_name, region_code, region_name,
+               income_group_code, income_group_name, lending_type_name, capital_city,
+               longitude, latitude, sort_order
+        from core.dim_country order by sort_order""",
+    "dim_indicator": """
+        select indicator_code, short_name, indicator_name, unit, aggregation_method,
+               numerator_code, denominator_code, weight_code, valid_min, valid_max,
+               source_organization, definition, sort_order
+        from core.dim_indicator order by sort_order""",
+    "dim_year": "select year from meta.scope_year order by year",
+    "fct_indicator_value": """
+        select indicator_value_id, country_iso3, indicator_code, year, value, is_missing,
+               missing_reason, obs_status, strftime(source_last_updated, '%Y-%m-%d') as source_last_updated,
+               source_response_id, source_request_url
+        from core.fct_indicator_value order by indicator_code, country_iso3, year""",
+}
+
 
 def export_reports(cfg: PipelineConfig, out_dir: Path | None = None) -> list[Path]:
     out_dir = out_dir or cfg.output_dir
@@ -40,6 +61,14 @@ def export_reports(cfg: PipelineConfig, out_dir: Path | None = None) -> list[Pat
             con.execute(f"copy ({rel}) to '{target.as_posix()}' (header, delimiter ',')")
             n = con.execute(f"select count(*) from reporting.{view}").fetchone()[0]
             log.info("exported %-28s %4d rows -> %s", view, n, target)
+            written.append((target, n))
+        bi_dir = out_dir / "powerbi"
+        bi_dir.mkdir(exist_ok=True)
+        for table, sql in BI_TABLES.items():
+            target = bi_dir / f"{table}.csv"
+            con.execute(f"copy ({sql}) to '{target.as_posix()}' (header, delimiter ',')")
+            n = con.execute(f"select count(*) from ({sql})").fetchone()[0]
+            log.info("exported %-28s %4d rows -> %s", f"powerbi/{table}", n, target)
             written.append((target, n))
         written_paths = [t for t, _ in written]
         written_paths.append(_write_manifest(con, cfg, out_dir, written))
@@ -71,7 +100,7 @@ def _write_manifest(
         "ingestion_started_at": started_at.isoformat(),
         "config_fingerprint": fingerprint,
         "source_last_updated_by_indicator": dict(source_versions),
-        "files": {t.name: {"rows": n} for t, n in files},
+        "files": {t.relative_to(out_dir).as_posix(): {"rows": n} for t, n in files},
         "lineage_hint": "source_response_id columns -> raw.api_response.response_id "
         "(exact payload + request_url)",
     }

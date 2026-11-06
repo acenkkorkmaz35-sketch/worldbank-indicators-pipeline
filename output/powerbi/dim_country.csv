@@ -1,0 +1,10 @@
+country_iso3,country_iso2,country_name,region_code,region_name,income_group_code,income_group_name,lending_type_name,capital_city,longitude,latitude,sort_order
+BRA,BR,Brazil,LCN,Latin America & Caribbean,UMC,Upper middle income,IBRD,Brasilia,-47.9292,-15.7801,0
+CAN,CA,Canada,NAC,North America,HIC,High income,Not classified,Ottawa,-75.6919,45.4215,1
+DEU,DE,Germany,ECS,Europe & Central Asia,HIC,High income,Not classified,Berlin,13.4115,52.5235,2
+GBR,GB,United Kingdom,ECS,Europe & Central Asia,HIC,High income,Not classified,London,-0.126236,51.5002,3
+IND,IN,India,SAS,South Asia,LMC,Lower middle income,IBRD,New Delhi,77.225,28.6353,4
+JPN,JP,Japan,EAS,East Asia & Pacific,HIC,High income,Not classified,Tokyo,139.77,35.67,5
+MEX,MX,Mexico,LCN,Latin America & Caribbean,UMC,Upper middle income,IBRD,Mexico City,-99.1276,19.427,6
+USA,US,United States,NAC,North America,HIC,High income,Not classified,Washington D.C.,-77.032,38.8895,7
+ZAF,ZA,South Africa,SSF,Sub-Saharan Africa,UMC,Upper middle income,IBRD,Pretoria,28.1871,-25.746,8

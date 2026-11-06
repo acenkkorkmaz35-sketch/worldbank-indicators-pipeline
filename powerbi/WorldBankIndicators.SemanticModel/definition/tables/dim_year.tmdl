@@ -1,0 +1,18 @@
+/// One row per year in scope. Use this (not the fact's year) on axes and slicers.
+table dim_year
+
+	column year
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: year
+
+	partition dim_year = m
+		mode: import
+		source =
+				let
+				    Source = WbCsv("dim_year.csv"),
+				    Typed = Table.TransformColumnTypes(Source, {{"year", Int64.Type}}, "en-US")
+				in
+				    Typed
+

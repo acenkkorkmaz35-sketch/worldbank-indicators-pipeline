@@ -1,0 +1,79 @@
+/// One row per country in scope (business key country_iso3). Income group = current WB classification.
+table dim_country
+
+	/// ISO 3166-1 alpha-3 code (business key).
+	column country_iso3
+		dataType: string
+		summarizeBy: none
+		sourceColumn: country_iso3
+
+	column country_iso2
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: country_iso2
+
+	column country_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: country_name
+		sortByColumn: sort_order
+
+	column region_code
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: region_code
+
+	column region_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: region_name
+
+	column income_group_code
+		dataType: string
+		summarizeBy: none
+		sourceColumn: income_group_code
+
+	column income_group_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: income_group_name
+
+	column lending_type_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: lending_type_name
+
+	column capital_city
+		dataType: string
+		summarizeBy: none
+		sourceColumn: capital_city
+
+	column longitude
+		dataType: double
+		summarizeBy: none
+		sourceColumn: longitude
+		dataCategory: Longitude
+
+	column latitude
+		dataType: double
+		summarizeBy: none
+		sourceColumn: latitude
+		dataCategory: Latitude
+
+	column sort_order
+		dataType: int64
+		isHidden
+		summarizeBy: none
+		sourceColumn: sort_order
+
+	partition dim_country = m
+		mode: import
+		source =
+				let
+				    Source = WbCsv("dim_country.csv"),
+				    Typed = Table.TransformColumnTypes(Source, {{"longitude", type number}, {"latitude", type number}, {"sort_order", Int64.Type}}, "en-US")
+				in
+				    Typed
+
