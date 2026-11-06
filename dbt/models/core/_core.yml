@@ -1,0 +1,89 @@
+version: 2
+
+models:
+  - name: dim_country
+    description: "Grain: one row per country in scope. Business key: country_iso3 (ISO 3166-1 alpha-3)."
+    columns:
+      - name: country_iso3
+        description: Business key.
+        data_tests: [unique, not_null]
+      - name: country_name
+        data_tests: [not_null]
+      - name: income_group_code
+        description: >
+          World Bank income classification *as currently published* (HIC, UMC, LMC, LIC).
+          The API exposes only the current classification, so it is applied to all years.
+        data_tests:
+          - not_null:
+              config: {severity: error}
+          - accepted_values:
+              arguments: {values: [HIC, UMC, LMC, LIC, INX]}
+      - name: has_source_metadata
+        description: False if the country is in scope but the API returned no metadata for it.
+        data_tests:
+          - accepted_values:
+              arguments: {values: [true]}
+
+  - name: dim_indicator
+    description: "Grain: one row per indicator in scope. Business key: indicator_code (World Bank code)."
+    columns:
+      - name: indicator_code
+        data_tests: [unique, not_null]
+      - name: short_name
+        data_tests: [unique, not_null]
+      - name: aggregation_method
+        data_tests:
+          - accepted_values:
+              arguments: {values: [sum, ratio, weighted_avg]}
+      - name: has_source_metadata
+        data_tests:
+          - accepted_values:
+              arguments: {values: [true]}
+
+  - name: fct_indicator_value
+    description: >
+      Grain: one row per (country_iso3, indicator_code, year) in scope - the full expected spine,
+      including combinations with no value. Loaded by MERGE on the business key; only rows whose
+      content changed are updated.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, indicator_code, year]
+    columns:
+      - name: indicator_value_id
+        description: Surrogate key, md5(country_iso3 | indicator_code | year).
+        data_tests: [unique, not_null]
+      - name: country_iso3
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_country'), field: country_iso3}
+      - name: indicator_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_indicator'), field: indicator_code}
+      - name: year
+        data_tests: [not_null]
+      - name: value
+        description: Observed value in the indicator's unit. NULL when missing - never 0 as a stand-in.
+      - name: is_missing
+        data_tests: [not_null]
+      - name: missing_reason
+        description: >
+          NULL when a value is present; 'null_in_source' when the API returned the row with a null
+          value; 'not_returned_by_source' when the API did not return the row at all.
+        data_tests:
+          - accepted_values:
+              arguments: {values: [null_in_source, not_returned_by_source]}
+      - name: source_response_id
+        description: raw.api_response row (exact payload) this value was parsed from.
+      - name: source_request_url
+        description: The exact API URL (incl. page) that returned this value.
+      - name: row_hash
+        description: Hash of business content; drives change detection in the MERGE.
+        data_tests: [not_null]
+      - name: first_loaded_at
+        description: When this key first entered the table. Never updated.
+      - name: last_changed_at
+        description: When value / missing status last changed.

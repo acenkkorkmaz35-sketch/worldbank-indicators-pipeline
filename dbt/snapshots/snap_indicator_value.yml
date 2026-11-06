@@ -1,0 +1,13 @@
+snapshots:
+  - name: snap_indicator_value
+    description: >
+      SCD2 history of every fact row. When the World Bank revises a value, back-fills a
+      previously missing year, or withdraws a value, the previous version is closed
+      (dbt_valid_to) and a new one opened, so corrections are auditable and as-of queries
+      are possible.
+    relation: ref('fct_indicator_value')
+    config:
+      unique_key: indicator_value_id
+      strategy: check
+      check_cols: [value, missing_reason, obs_status, decimal_places]
+      hard_deletes: invalidate

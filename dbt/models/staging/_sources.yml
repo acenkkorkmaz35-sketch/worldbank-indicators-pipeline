@@ -1,0 +1,46 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Landed World Bank API payloads, written only by the Python ingestion (src/wb_pipeline/ingest.py).
+    tables:
+      - name: ingestion_run
+        description: One row per pipeline ingestion run, with status and the config fingerprint used.
+        columns:
+          - name: run_id
+            data_tests: [unique, not_null]
+      - name: api_response
+        description: >
+          Content-addressed store of every distinct API page ever received.
+          response_id = sha256(request_url, body); identical re-fetches are not re-inserted.
+        columns:
+          - name: response_id
+            data_tests: [unique, not_null]
+      - name: api_fetch_log
+        description: Every fetch of every page in every run, pointing at the stored payload.
+        columns:
+          - name: response_id
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments: {to: "source('raw', 'api_response')", field: response_id}
+
+  - name: meta
+    description: Pipeline scope mirrored from config/pipeline.yml on every successful ingestion run.
+    tables:
+      - name: scope_country
+        columns:
+          - name: country_iso3
+            data_tests: [unique, not_null]
+      - name: scope_indicator
+        columns:
+          - name: indicator_code
+            data_tests: [unique, not_null]
+          - name: aggregation_method
+            data_tests:
+              - accepted_values:
+                  arguments: {values: [sum, ratio, weighted_avg]}
+      - name: scope_year
+        columns:
+          - name: year
+            data_tests: [unique, not_null]
