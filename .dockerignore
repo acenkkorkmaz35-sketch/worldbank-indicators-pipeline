@@ -1,8 +1,12 @@
 .venv
 .git
 data
-output
 dbt/target
 dbt/logs
 **/__pycache__
 *.egg-info
+**/.pbi
+# generated reports are not baked into the image, except the star-schema sample that
+# the Power BI model contract tests compare against
+output/*
+!output/powerbi
