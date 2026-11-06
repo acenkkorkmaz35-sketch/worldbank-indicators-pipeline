@@ -1,0 +1,8 @@
+.venv
+.git
+data
+output
+dbt/target
+dbt/logs
+**/__pycache__
+*.egg-info

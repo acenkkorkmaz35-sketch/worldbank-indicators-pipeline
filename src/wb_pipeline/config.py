@@ -12,7 +12,18 @@ from typing import Literal, Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+def _repo_root() -> Path:
+    """Project root (holds config/ and dbt/). Works for editable installs, regular installs
+    run from the project directory (e.g. Docker WORKDIR), or an explicit WB_PIPELINE_HOME."""
+    if os.environ.get("WB_PIPELINE_HOME"):
+        return Path(os.environ["WB_PIPELINE_HOME"]).resolve()
+    source_tree = Path(__file__).resolve().parents[2]
+    if (source_tree / "dbt" / "dbt_project.yml").exists():
+        return source_tree
+    return Path.cwd()
+
+
+REPO_ROOT = _repo_root()
 DEFAULT_CONFIG_PATH = REPO_ROOT / "config" / "pipeline.yml"
 
 _ISO3 = re.compile(r"^[A-Z]{3}$")
