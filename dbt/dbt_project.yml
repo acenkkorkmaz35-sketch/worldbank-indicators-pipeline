@@ -10,9 +10,13 @@ macro-paths: ["macros"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages", "logs"]
 
+flags:
+  send_anonymous_usage_stats: false   # no telemetry: the pipeline makes no network calls besides the API
+  version_check: false
+
 vars:
-  # Overridden at runtime from config/pipeline.yml (quality.gdp_per_capita_tolerance).
-  gdp_per_capita_tolerance: 0.005
+  # Overridden at runtime from config/pipeline.yml (quality.ratio_reconciliation_tolerance).
+  ratio_reconciliation_tolerance: 0.005
 
 models:
   wb_indicators:

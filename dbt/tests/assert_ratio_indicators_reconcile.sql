@@ -1,8 +1,8 @@
 -- Cross-indicator consistency: every 'ratio' indicator must reconcile with its components,
--- e.g. GDP per capita = GDP / population, within quality.gdp_per_capita_tolerance (relative).
+-- e.g. GDP per capita = GDP / population, within quality.ratio_reconciliation_tolerance (relative).
 -- Driven by dim_indicator, so a new ratio indicator added in config is checked automatically.
 
-{% set tolerance = var('gdp_per_capita_tolerance') %}
+{% set tolerance = var('ratio_reconciliation_tolerance') %}
 
 with f as (select * from {{ ref('fct_indicator_value') }}),
 

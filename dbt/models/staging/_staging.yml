@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: stg_wb__current_responses
+    description: "Every API page fetched by the latest successful ingestion run. Grain: one row per response page."
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [request_key, page]}
+    columns:
+      - name: response_id
+        data_tests: [not_null]
+      - name: endpoint
+        data_tests:
+          - accepted_values:
+              arguments: {values: [country, indicator, observation]}
+
+  - name: stg_wb__observations
+    description: "Typed observations parsed from current payloads. Grain: one row per (country_iso3, indicator_code, year) returned by the API."
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [country_iso3, indicator_code, year]}
+    columns:
+      - name: country_iso3
+        data_tests: [not_null]
+      - name: indicator_code
+        data_tests: [not_null]
+      - name: source_response_id
+        description: The raw.api_response row this observation was parsed from.
+        data_tests: [not_null]
+
+  - name: stg_wb__countries
+    description: "Country metadata, trimmed and typed. Grain: one row per country returned by the API."
+    columns:
+      - name: country_iso3
+        data_tests: [unique, not_null]
+
+  - name: stg_wb__indicators
+    description: "Indicator metadata (name, definition, source organisation). Grain: one row per indicator."
+    columns:
+      - name: indicator_code
+        data_tests: [unique, not_null]

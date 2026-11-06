@@ -48,8 +48,10 @@ base as (
         f_latest.country_iso3,
         p.latest_year,
         f_latest.value                                       as value_at_latest_year,
+        f_latest.source_response_id                          as source_response_id_at_latest_year,
         cy.latest_complete_year,
         f_complete.value                                     as value_at_latest_complete_year,
+        f_complete.source_response_id                        as source_response_id_at_latest_complete_year,
         o.own_latest_year,
         o.own_latest_value
     from per_indicator as p
@@ -91,7 +93,9 @@ select
                      order by b.value_at_latest_complete_year desc nulls last) end
                                                                      as rank_at_latest_complete_year,
     b.own_latest_year,
-    b.own_latest_value
+    b.own_latest_value,
+    b.source_response_id_at_latest_year,
+    b.source_response_id_at_latest_complete_year
 from base as b
 inner join {{ ref('dim_country') }} as c on b.country_iso3 = c.country_iso3
 inner join {{ ref('dim_indicator') }} as i on b.indicator_code = i.indicator_code

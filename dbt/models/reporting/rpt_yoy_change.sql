@@ -17,6 +17,8 @@ with f as (
         year,
         value,
         lag(value) over w                                      as prior_year_value,
+        source_response_id,
+        lag(source_response_id) over w                         as prior_source_response_id,
         last_value(value ignore nulls) over w_prev             as last_available_prior_value,
         last_value(case when value is not null then year end ignore nulls) over w_prev
                                                                as last_available_prior_year,
@@ -58,7 +60,10 @@ select
          and f.value > 0
         then power(f.value / f.last_available_prior_value,
                    1.0 / (f.year - f.last_available_prior_year)) - 1
-    end                                                as annualised_pct_change_vs_last_available
+    end                                                as annualised_pct_change_vs_last_available,
+    -- lineage: the raw.api_response rows both sides of the comparison came from
+    f.source_response_id,
+    f.prior_source_response_id
 from f
 inner join {{ ref('dim_country') }} as c on f.country_iso3 = c.country_iso3
 inner join {{ ref('dim_indicator') }} as i on f.indicator_code = i.indicator_code

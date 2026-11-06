@@ -13,6 +13,7 @@ select
     s.weight_code,
     s.valid_min,
     s.valid_max,
+    s.max_abs_yoy_change,
     i.source_database,
     i.source_organization,
     i.definition,

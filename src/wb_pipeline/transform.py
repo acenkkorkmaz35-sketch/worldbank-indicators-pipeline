@@ -6,7 +6,6 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from pathlib import Path
 
 from .config import REPO_ROOT, PipelineConfig
 
@@ -31,11 +30,14 @@ class BuildResult:
 
 
 def dbt_args(cfg: PipelineConfig) -> list[str]:
-    dbt_vars = {"gdp_per_capita_tolerance": cfg.quality.gdp_per_capita_tolerance}
+    dbt_vars = {"ratio_reconciliation_tolerance": cfg.quality.ratio_reconciliation_tolerance}
     return [
-        "--project-dir", str(DBT_DIR),
-        "--profiles-dir", str(DBT_DIR),
-        "--vars", json.dumps(dbt_vars),
+        "--project-dir",
+        str(DBT_DIR),
+        "--profiles-dir",
+        str(DBT_DIR),
+        "--vars",
+        json.dumps(dbt_vars),
     ]
 
 

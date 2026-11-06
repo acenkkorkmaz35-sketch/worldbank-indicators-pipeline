@@ -7,10 +7,11 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
 
 def _repo_root() -> Path:
     """Project root (holds config/ and dbt/). Works for editable installs, regular installs
@@ -47,7 +48,7 @@ class YearRange(_Strict):
     end: int = Field(le=2100)
 
     @model_validator(mode="after")
-    def _ordered(self) -> "YearRange":
+    def _ordered(self) -> YearRange:
         if self.start > self.end:
             raise ValueError(f"years.start ({self.start}) must be <= years.end ({self.end})")
         return self
@@ -63,12 +64,12 @@ class YearRange(_Strict):
 
 class Aggregation(_Strict):
     method: Literal["sum", "ratio", "weighted_avg"]
-    numerator: Optional[str] = None
-    denominator: Optional[str] = None
-    weight: Optional[str] = None
+    numerator: str | None = None
+    denominator: str | None = None
+    weight: str | None = None
 
     @model_validator(mode="after")
-    def _required_fields(self) -> "Aggregation":
+    def _required_fields(self) -> Aggregation:
         if self.method == "ratio" and not (self.numerator and self.denominator):
             raise ValueError("ratio aggregation needs numerator and denominator")
         if self.method == "weighted_avg" and not self.weight:
@@ -77,8 +78,14 @@ class Aggregation(_Strict):
 
 
 class ValidRange(_Strict):
-    min: Optional[float] = None
-    max: Optional[float] = None
+    min: float | None = None
+    max: float | None = None
+
+    @model_validator(mode="after")
+    def _ordered(self) -> ValidRange:
+        if self.min is not None and self.max is not None and self.min > self.max:
+            raise ValueError(f"valid_range.min ({self.min}) must be <= valid_range.max ({self.max})")
+        return self
 
 
 class IndicatorConfig(_Strict):
@@ -87,6 +94,7 @@ class IndicatorConfig(_Strict):
     unit: str
     aggregation: Aggregation
     valid_range: ValidRange = ValidRange()
+    max_abs_yoy_change: float | None = Field(None, gt=0)
 
     @field_validator("code")
     @classmethod
@@ -114,7 +122,7 @@ class ScopeConfig(_Strict):
         return out
 
     @model_validator(mode="after")
-    def _indicator_refs(self) -> "ScopeConfig":
+    def _indicator_refs(self) -> ScopeConfig:
         codes = [i.code for i in self.indicators]
         if len(set(codes)) != len(codes):
             raise ValueError("duplicate indicator codes in scope")
@@ -132,7 +140,7 @@ class ScopeConfig(_Strict):
 
 
 class QualityConfig(_Strict):
-    gdp_per_capita_tolerance: float = Field(0.005, gt=0, lt=1)
+    ratio_reconciliation_tolerance: float = Field(0.005, gt=0, lt=1)
 
 
 class WarehouseConfig(_Strict):

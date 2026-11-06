@@ -13,9 +13,10 @@ import json
 import logging
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlencode
 
 import requests
@@ -41,12 +42,12 @@ class ApiPage:
 
     request_key: str
     endpoint: str
-    entity: Optional[str]
+    entity: str | None
     request_url: str
     page: int
     pages: int
     total: int
-    source_last_updated: Optional[str]
+    source_last_updated: str | None
     http_status: int
     fetched_at: datetime
     body_text: str
@@ -57,7 +58,7 @@ class WorldBankClient:
     def __init__(
         self,
         cfg: SourceConfig,
-        session: Optional[requests.Session] = None,
+        session: requests.Session | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.cfg = cfg
@@ -97,7 +98,7 @@ class WorldBankClient:
 
     # -- paging ----------------------------------------------------------
     def _fetch_all_pages(
-        self, request_key: str, endpoint: str, entity: Optional[str], path: str, params: dict
+        self, request_key: str, endpoint: str, entity: str | None, path: str, params: dict
     ) -> list[ApiPage]:
         first = self._fetch_page(request_key, endpoint, entity, path, params, page=1)
         pages = [first]
@@ -120,7 +121,7 @@ class WorldBankClient:
         return pages
 
     def _fetch_page(
-        self, request_key: str, endpoint: str, entity: Optional[str], path: str, params: dict, page: int
+        self, request_key: str, endpoint: str, entity: str | None, path: str, params: dict, page: int
     ) -> ApiPage:
         query = dict(params, format="json", per_page=self.cfg.per_page, page=page)
         # Deterministic URL (sorted params) => identical requests hash identically in the raw layer.
@@ -141,7 +142,7 @@ class WorldBankClient:
             total=int(meta.get("total") or 0),
             source_last_updated=meta.get("lastupdated"),
             http_status=status,
-            fetched_at=datetime.now(timezone.utc),
+            fetched_at=datetime.now(UTC),
             body_text=text,
             rows=rows,
         )
@@ -154,9 +155,7 @@ class WorldBankClient:
                 return self._get_once(url)
             except TransientAPIError as exc:
                 if attempt >= self.cfg.max_retries:
-                    raise WorldBankAPIError(
-                        f"giving up after {attempt + 1} attempts: {url}: {exc}"
-                    ) from exc
+                    raise WorldBankAPIError(f"giving up after {attempt + 1} attempts: {url}: {exc}") from exc
                 delay = self.cfg.backoff_seconds * (2**attempt) + random.uniform(0, 0.25)
                 log.warning("transient error (attempt %s): %s; retrying in %.2fs", attempt + 1, exc, delay)
                 self._sleep(delay)

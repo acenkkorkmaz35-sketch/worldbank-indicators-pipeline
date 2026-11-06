@@ -36,7 +36,13 @@ inputs as (
             when 'sum'          then f.value is not null
             when 'ratio'        then num.value is not null and den.value is not null and den.value <> 0
             when 'weighted_avg' then f.value is not null and wt.value is not null and wt.value > 0
-        end       as contributes
+        end       as contributes,
+        -- lineage: the raw.api_response rows of the inputs this aggregation actually uses
+        case i.aggregation_method
+            when 'sum'          then [f.source_response_id]
+            when 'ratio'        then [num.source_response_id, den.source_response_id]
+            when 'weighted_avg' then [f.source_response_id, wt.source_response_id]
+        end       as input_response_ids
     from f
     inner join {{ ref('dim_indicator') }} as i on f.indicator_code = i.indicator_code
     left join f as num
@@ -70,6 +76,9 @@ aggregated as (
                 / nullif(sum(weight_value) filter (where contributes), 0)
         end                                                        as group_value,
         avg(value)                                                 as simple_avg_of_countries,
+        array_to_string(list_sort(list_distinct(flatten(
+            list(input_response_ids) filter (where contributes)))), ' | ')
+                                                                   as source_response_ids,
         min(value)                                                 as min_country_value,
         max(value)                                                 as max_country_value,
         grouping(income_group_code)                                as is_all_countries_row
@@ -81,7 +90,12 @@ aggregated as (
 )
 
 select
-    * exclude (is_all_countries_row),
+    * exclude (is_all_countries_row, source_response_ids),
     countries_contributing = countries_in_group as is_complete,
-    is_all_countries_row = 1                    as is_all_countries_row
+    -- relative position of the group vs all selected countries (1.0 = same level)
+    group_value / nullif(max(case when is_all_countries_row = 1 then group_value end)
+                         over (partition by indicator_code, year), 0)
+                                                as ratio_to_all_selected,
+    is_all_countries_row = 1                    as is_all_countries_row,
+    source_response_ids
 from aggregated

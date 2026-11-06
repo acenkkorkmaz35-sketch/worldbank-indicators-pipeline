@@ -19,7 +19,7 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -90,6 +90,9 @@ create table if not exists meta.scope_indicator (
     valid_max           double,
     sort_order          integer not null
 );
+
+-- additive migrations for warehouses created by earlier versions
+alter table meta.scope_indicator add column if not exists max_abs_yoy_change double;
 """
 
 
@@ -119,10 +122,20 @@ def write_request(con: duckdb.DuckDBPyConnection, run_id: str, pages: list[ApiPa
                 returning response_id
                 """,
                 [
-                    rid, p.request_key, p.endpoint, p.entity, p.request_url, p.page, p.pages,
-                    p.total, p.source_last_updated,
-                    hashlib.sha256(p.body_text.encode()).hexdigest(), p.body_text,
-                    p.fetched_at, run_id, rid,
+                    rid,
+                    p.request_key,
+                    p.endpoint,
+                    p.entity,
+                    p.request_url,
+                    p.page,
+                    p.pages,
+                    p.total,
+                    p.source_last_updated,
+                    hashlib.sha256(p.body_text.encode()).hexdigest(),
+                    p.body_text,
+                    p.fetched_at,
+                    run_id,
+                    rid,
                 ],
             ).fetchall()
             new += len(inserted)
@@ -150,12 +163,25 @@ def write_scope(con: duckdb.DuckDBPyConnection, cfg: PipelineConfig) -> None:
         con.executemany("insert into meta.scope_year values (?)", [[y] for y in s.years.years])
         con.execute("delete from meta.scope_indicator")
         con.executemany(
-            "insert into meta.scope_indicator values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            """
+            insert into meta.scope_indicator (
+                indicator_code, short_name, unit, aggregation_method, numerator_code,
+                denominator_code, weight_code, valid_min, valid_max, sort_order, max_abs_yoy_change
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             [
                 [
-                    i.code, i.short_name, i.unit, i.aggregation.method,
-                    i.aggregation.numerator, i.aggregation.denominator, i.aggregation.weight,
-                    i.valid_range.min, i.valid_range.max, n,
+                    i.code,
+                    i.short_name,
+                    i.unit,
+                    i.aggregation.method,
+                    i.aggregation.numerator,
+                    i.aggregation.denominator,
+                    i.aggregation.weight,
+                    i.valid_range.min,
+                    i.valid_range.max,
+                    n,
+                    i.max_abs_yoy_change,
                 ]
                 for n, i in enumerate(s.indicators)
             ],
@@ -169,11 +195,11 @@ def write_scope(con: duckdb.DuckDBPyConnection, cfg: PipelineConfig) -> None:
 def run_ingestion(cfg: PipelineConfig, client: WorldBankClient | None = None) -> str:
     """Fetch everything in scope and land it in the raw layer. Returns the run_id."""
     client = client or WorldBankClient(cfg.source)
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     con = connect(cfg.warehouse_path)
     con.execute(
         "insert into raw.ingestion_run values (?, ?, null, 'running', ?, ?::json, null)",
-        [run_id, datetime.now(timezone.utc), cfg.fingerprint(), json.dumps(cfg.model_dump(mode="json"))],
+        [run_id, datetime.now(UTC), cfg.fingerprint(), json.dumps(cfg.model_dump(mode="json"))],
     )
     log.info("ingestion run %s started -> %s", run_id, cfg.warehouse_path)
 
@@ -197,17 +223,20 @@ def run_ingestion(cfg: PipelineConfig, client: WorldBankClient | None = None) ->
         write_scope(con, cfg)
         con.execute(
             "update raw.ingestion_run set status = 'success', finished_at = ? where run_id = ?",
-            [datetime.now(timezone.utc), run_id],
+            [datetime.now(UTC), run_id],
         )
         log.info(
             "ingestion run %s succeeded: %s requests, %s pages, %s new payload(s)",
-            run_id, stats["requests"], stats["pages"], stats["new_payloads"],
+            run_id,
+            stats["requests"],
+            stats["pages"],
+            stats["new_payloads"],
         )
         return run_id
     except Exception as exc:
         con.execute(
             "update raw.ingestion_run set status = 'failed', finished_at = ?, error = ? where run_id = ?",
-            [datetime.now(timezone.utc), str(exc)[:2000], run_id],
+            [datetime.now(UTC), str(exc)[:2000], run_id],
         )
         log.error("ingestion run %s failed: %s", run_id, exc)
         raise

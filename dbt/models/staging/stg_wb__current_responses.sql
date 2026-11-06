@@ -1,28 +1,21 @@
--- The payloads that are "current" for each logical request: all pages fetched by the most
--- recent *successful* run that fetched that request. Failed runs are ignored entirely, so a
--- partially failed refresh can never mix new and old data across indicators.
+-- The payloads that make up the current view of the source: every page fetched by the most
+-- recent *successful* ingestion run.
+--
+-- Why the whole run, not "latest fetch per request":
+--   * one run = one consistent snapshot of the source (GDP, population and GDP per capita
+--     all come from the same moment, so cross-indicator checks are meaningful);
+--   * a value the source withdraws, or a country removed from scope, can never be resurrected
+--     from an older request whose key no longer exists (e.g. a different country list);
+--   * failed or still-running runs are ignored entirely, so a refresh that dies half way never
+--     mixes new and old data.
+-- Every run fetches the full configured scope, so the latest successful run is complete.
+-- (A partial-refresh mode would need per-request selection - see README "next steps".)
 
-with fetches as (
-    select
-        f.run_id,
-        f.request_key,
-        f.page,
-        f.response_id,
-        f.fetched_at,
-        r.started_at as run_started_at
-    from {{ source('raw', 'api_fetch_log') }} as f
-    inner join {{ source('raw', 'ingestion_run') }} as r
-        on f.run_id = r.run_id
-    where r.status = 'success'
-),
-
-latest_run_per_request as (
-    select request_key, run_id
-    from fetches
-    qualify row_number() over (
-        partition by request_key
-        order by run_started_at desc, run_id desc
-    ) = 1
+with latest_successful_run as (
+    select run_id
+    from {{ source('raw', 'ingestion_run') }}
+    where status = 'success'
+    qualify row_number() over (order by started_at desc, run_id desc) = 1
 )
 
 select
@@ -38,9 +31,8 @@ select
     resp.payload,
     f.run_id      as fetched_in_run_id,
     f.fetched_at
-from fetches as f
-inner join latest_run_per_request as l
-    on f.request_key = l.request_key
-   and f.run_id = l.run_id
+from {{ source('raw', 'api_fetch_log') }} as f
+inner join latest_successful_run as r
+    on f.run_id = r.run_id
 inner join {{ source('raw', 'api_response') }} as resp
     on f.response_id = resp.response_id

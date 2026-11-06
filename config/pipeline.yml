@@ -31,12 +31,14 @@ scope:
     #   sum            -> sum of country values
     #   ratio          -> sum(numerator) / sum(denominator)
     #   weighted_avg   -> sum(value * weight) / sum(weight)
-    # valid_range is enforced by a data-quality test (inclusive bounds, null = unbounded).
+    # valid_range is enforced by a data-quality test (inclusive bounds, null = unbounded): error.
+    # max_abs_yoy_change (optional, fraction) flags implausible year-over-year jumps: warning.
     - code: SP.POP.TOTL
       short_name: population
       unit: people
       aggregation: {method: sum}
       valid_range: {min: 1, max: 2000000000}
+      max_abs_yoy_change: 0.05      # populations rarely move >5% a year; a jump = definition change
 
     - code: NY.GDP.MKTP.CD
       short_name: gdp_usd
@@ -55,10 +57,12 @@ scope:
       unit: years
       aggregation: {method: weighted_avg, weight: SP.POP.TOTL}
       valid_range: {min: 20, max: 100}
+      max_abs_yoy_change: 0.10
 
 quality:
-  # GDP per capita must reconcile with GDP / population within this relative tolerance.
-  gdp_per_capita_tolerance: 0.005
+  # Every 'ratio' indicator must reconcile with its components within this relative tolerance
+  # (here: GDP per capita vs GDP / population). The live data reconciles exactly.
+  ratio_reconciliation_tolerance: 0.005
 
 warehouse:
   path: data/warehouse.duckdb   # relative to the repo root unless absolute; override with WB_DUCKDB_PATH
