@@ -14,11 +14,11 @@ def test_paging_collects_every_page(tmp_path, fake_api):
     cfg = make_config(tmp_path, per_page=2)
     pages = client_for(cfg, fake_api).fetch_observations("SP.POP.TOTL", ["BRA", "IND", "USA"], DATE)
 
-    assert [p.page for p in pages] == [1, 2, 3, 4, 5]          # 9 rows / 2 per page
+    assert [p.page for p in pages] == [1, 2, 3, 4, 5]  # 9 rows / 2 per page
     assert sum(len(p.rows) for p in pages) == 9
-    assert len({p.request_url for p in pages}) == 5            # each page traceable to its URL
+    assert len({p.request_url for p in pages}) == 5  # each page traceable to its URL
     keys = {(r["countryiso3code"], r["date"]) for p in pages for r in p.rows}
-    assert len(keys) == 9                                       # no row lost or duplicated
+    assert len(keys) == 9  # no row lost or duplicated
 
 
 def test_request_url_is_deterministic(cfg, fake_api):
@@ -37,15 +37,16 @@ def test_error_envelope_with_http_200_is_an_error(cfg):
 def test_transient_failures_are_retried_with_backoff(cfg, fake_api):
     fake_api.failures = {"SP.POP.TOTL": [503, timeout_error(), "<html>busy</html>"]}
     delays = []
-    client = WorldBankClient(cfg.source.model_copy(update={"backoff_seconds": 1.0}),
-                             session=fake_api, sleep=delays.append)
+    client = WorldBankClient(
+        cfg.source.model_copy(update={"backoff_seconds": 1.0}), session=fake_api, sleep=delays.append
+    )
 
     pages = client.fetch_observations("SP.POP.TOTL", ["BRA"], DATE)
 
     assert sum(len(p.rows) for p in pages) == 3
-    assert len(fake_api.calls) == 4                    # 3 failures + 1 success
+    assert len(fake_api.calls) == 4  # 3 failures + 1 success
     assert len(delays) == 3
-    assert delays[0] < delays[1] < delays[2]           # exponential backoff
+    assert delays[0] < delays[1] < delays[2]  # exponential backoff
 
 
 def test_gives_up_after_max_retries(cfg, fake_api):

@@ -13,7 +13,10 @@ def test_production_config_is_valid():
     assert cfg.scope.countries == ["BRA", "CAN", "DEU", "GBR", "IND", "JPN", "MEX", "USA", "ZAF"]
     assert cfg.scope.years.years == list(range(2018, 2025))
     assert {i.code for i in cfg.scope.indicators} == {
-        "SP.POP.TOTL", "NY.GDP.MKTP.CD", "NY.GDP.PCAP.CD", "SP.DYN.LE00.IN"
+        "SP.POP.TOTL",
+        "NY.GDP.MKTP.CD",
+        "NY.GDP.PCAP.CD",
+        "SP.DYN.LE00.IN",
     }
 
 
@@ -32,10 +35,11 @@ def test_country_codes_are_normalised_and_validated():
     [
         (lambda d: d["scope"]["years"].update(start=2025, end=2018), "must be <="),
         (lambda d: d["scope"]["countries"].append("BRA"), "duplicate country"),
-        (lambda d: d["scope"]["indicators"][2]["aggregation"].update(denominator="XX.UNKNOWN"),
-         "not an indicator in scope"),
-        (lambda d: d["scope"]["indicators"][3]["aggregation"].update(weight=None),
-         "needs weight"),
+        (
+            lambda d: d["scope"]["indicators"][2]["aggregation"].update(denominator="XX.UNKNOWN"),
+            "not an indicator in scope",
+        ),
+        (lambda d: d["scope"]["indicators"][3]["aggregation"].update(weight=None), "needs weight"),
         (lambda d: d.update(unexpected_key=1), "Extra inputs"),
     ],
 )

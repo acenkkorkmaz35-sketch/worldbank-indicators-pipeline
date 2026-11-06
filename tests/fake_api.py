@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import requests
@@ -32,8 +32,7 @@ INDICATOR_NAMES = {
 }
 
 ERROR_ENVELOPE = (
-    '[{"message":[{"id":"120","key":"Invalid value",'
-    '"value":"The provided parameter value is not valid"}]}]'
+    '[{"message":[{"id":"120","key":"Invalid value","value":"The provided parameter value is not valid"}]}]'
 )
 
 
@@ -45,8 +44,8 @@ def base_observations(countries, years) -> dict[tuple[str, str, int], Any]:
     obs = {}
     for c in countries:
         for i, y in enumerate(years):
-            p = round(pop[c] * (1.01 ** i))
-            pc = gdppc[c] * (1.03 ** i)
+            p = round(pop[c] * (1.01**i))
+            pc = gdppc[c] * (1.03**i)
             obs[("SP.POP.TOTL", c, y)] = p
             obs[("NY.GDP.PCAP.CD", c, y)] = pc
             obs[("NY.GDP.MKTP.CD", c, y)] = pc * p
@@ -74,7 +73,7 @@ class FakeWorldBank:
     def headers(self) -> dict:
         return self.__dict__.setdefault("_headers", {})
 
-    def get(self, url: str, timeout: Optional[float] = None) -> FakeResponse:
+    def get(self, url: str, timeout: float | None = None) -> FakeResponse:
         self.calls.append(url)
         for needle, script in self.failures.items():
             if needle in url and script:
@@ -102,12 +101,17 @@ class FakeWorldBank:
 
         if parts[0] == "indicator" and len(parts) == 2:
             code = parts[1]
-            rows = [{
-                "id": code, "name": INDICATOR_NAMES.get(code, code), "unit": "",
-                "source": {"id": "2", "value": "World Development Indicators"},
-                "sourceNote": f"Definition of {code}.", "sourceOrganization": "Test org",
-                "topics": [],
-            }]
+            rows = [
+                {
+                    "id": code,
+                    "name": INDICATOR_NAMES.get(code, code),
+                    "unit": "",
+                    "source": {"id": "2", "value": "World Development Indicators"},
+                    "sourceNote": f"Definition of {code}.",
+                    "sourceOrganization": "Test org",
+                    "topics": [],
+                }
+            ]
             return self._paged(rows, page, per_page, last_updated=None)
 
         if parts[0] == "country" and parts[2] == "indicator":
@@ -119,12 +123,21 @@ class FakeWorldBank:
                     v = self.observations.get((indicator, c, y), NOT_RETURNED)
                     if v is NOT_RETURNED:
                         continue
-                    rows.append({
-                        "indicator": {"id": indicator, "value": INDICATOR_NAMES.get(indicator, indicator)},
-                        "country": {"id": COUNTRY_META[c][0], "value": COUNTRY_META[c][1]},
-                        "countryiso3code": c, "date": str(y), "value": v,
-                        "unit": "", "obs_status": "", "decimal": 0 if indicator == "SP.POP.TOTL" else 1,
-                    })
+                    rows.append(
+                        {
+                            "indicator": {
+                                "id": indicator,
+                                "value": INDICATOR_NAMES.get(indicator, indicator),
+                            },
+                            "country": {"id": COUNTRY_META[c][0], "value": COUNTRY_META[c][1]},
+                            "countryiso3code": c,
+                            "date": str(y),
+                            "value": v,
+                            "unit": "",
+                            "obs_status": "",
+                            "decimal": 0 if indicator == "SP.POP.TOTL" else 1,
+                        }
+                    )
             return self._paged(rows, page, per_page, last_updated=self.last_updated)
 
         return ERROR_ENVELOPE
@@ -133,19 +146,23 @@ class FakeWorldBank:
     def _country(c: str) -> dict:
         iso2, name, rid, rname, inc, incname = COUNTRY_META[c]
         return {
-            "id": c, "iso2Code": iso2, "name": name,
+            "id": c,
+            "iso2Code": iso2,
+            "name": name,
             "region": {"id": rid, "iso2code": "XX", "value": rname},
             "adminregion": {"id": "", "iso2code": "", "value": ""},
             "incomeLevel": {"id": inc, "iso2code": "XX", "value": incname},
             "lendingType": {"id": "IBD", "iso2code": "XF", "value": "IBRD"},
-            "capitalCity": "Capital", "longitude": "-47.9", "latitude": "",
+            "capitalCity": "Capital",
+            "longitude": "-47.9",
+            "latitude": "",
         }
 
     @staticmethod
-    def _paged(rows: list, page: int, per_page: int, last_updated: Optional[str]) -> str:
+    def _paged(rows: list, page: int, per_page: int, last_updated: str | None) -> str:
         total = len(rows)
         pages = max(math.ceil(total / per_page), 1) if total else 0
-        chunk = rows[(page - 1) * per_page: page * per_page]
+        chunk = rows[(page - 1) * per_page : page * per_page]
         meta = {"page": page, "pages": pages, "per_page": per_page, "total": total}
         if last_updated:
             meta.update(sourceid="2", lastupdated=last_updated)
