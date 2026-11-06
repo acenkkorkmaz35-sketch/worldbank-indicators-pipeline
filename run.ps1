@@ -9,7 +9,7 @@ $py = if (Get-Command py -ErrorAction SilentlyContinue) { "py" } else { "python"
 if (-not (Test-Path ".venv\Scripts\wb-pipeline.exe")) {
     & $py -m venv .venv
     & .venv\Scripts\python.exe -m pip install --quiet --upgrade pip
-    & .venv\Scripts\python.exe -m pip install --quiet -e ".[dev]"
+    & .venv\Scripts\python.exe -m pip install --quiet -e ".[dev]" -c constraints.txt
 }
 $env:PYTHONIOENCODING = "utf-8"
 

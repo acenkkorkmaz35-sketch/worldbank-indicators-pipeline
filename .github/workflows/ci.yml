@@ -3,9 +3,11 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
+    name: lint + tests (offline)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,6 +15,42 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: python -m pip install -e ".[dev]"
-      - name: Tests (offline - fake API, dbt against a temp DuckDB)
+      - run: python -m pip install -e ".[dev]" -c constraints.txt
+      - run: ruff check src tests && ruff format --check src tests
+      - name: pytest (fake API, dbt against a temp DuckDB - no network needed)
         run: python -m pytest
+
+  make-run:
+    name: "`make run` from a clean checkout (live API smoke test)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: make run
+      - name: rerun is idempotent (no new payloads, no changed rows)
+        run: |
+          .venv/bin/wb-pipeline run 2>&1 | tee rerun.log
+          grep -q "0 new payload(s)" rerun.log
+          .venv/bin/python - <<'EOF'
+          import duckdb
+          con = duckdb.connect("data/warehouse.duckdb", read_only=True)
+          n, changed = con.execute(
+              "select count(*), count(distinct last_changed_at) from core.fct_indicator_value").fetchone()
+          assert (n, changed) == (252, 1), (n, changed)
+          print("fact rows:", n, "- distinct last_changed_at:", changed)
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reporting-output
+          path: output/
+
+  docker:
+    name: docker build + tests in container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t wb-pipeline .
+      - run: docker run --rm --entrypoint python wb-pipeline -m pytest -q
+      - run: docker run --rm -v "$PWD/output:/app/output" wb-pipeline run
