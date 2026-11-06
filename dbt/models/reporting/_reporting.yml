@@ -1,0 +1,58 @@
+version: 2
+
+models:
+  - name: rpt_missing_data
+    description: "Q1 - every missing (country, indicator, year), with reason and gap type. Grain: country x indicator x year (missing only)."
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [country_iso3, indicator_code, year]}
+    columns:
+      - name: gap_type
+        data_tests:
+          - accepted_values:
+              arguments: {values: [no_data_in_scope, not_yet_published, before_series_start, gap_in_series]}
+
+  - name: rpt_coverage_summary
+    description: "Q1 - completeness of each country x indicator series. Grain: country x indicator."
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [country_iso3, indicator_code]}
+    columns:
+      - name: coverage_status
+        data_tests:
+          - accepted_values:
+              arguments: {values: [complete, incomplete, empty]}
+
+  - name: rpt_yoy_change
+    description: "Q2 - year-over-year change with explicit handling of missing / zero prior values. Grain: country x indicator x year."
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [country_iso3, indicator_code, year]}
+    columns:
+      - name: pct_change
+        description: (value - prior) / abs(prior). NULL when either value is missing or prior is 0.
+      - name: yoy_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [ok, no_prior_year_in_scope, current_value_missing, prior_value_missing, prior_value_zero]}
+
+  - name: rpt_latest_year_comparison
+    description: "Q3 - cross-country comparison at the latest year with any data and at the latest year with complete data. Grain: indicator x country."
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [indicator_code, country_iso3]}
+
+  - name: rpt_income_group_by_year
+    description: "Q4 - indicators aggregated by (current) World Bank income group and year, using config-driven aggregation rules. Grain: income group x indicator x year (+ an 'ALL' row)."
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [income_group_code, indicator_code, year]}
+    columns:
+      - name: group_value
+        description: Aggregated value - sum, ratio of sums, or weighted average per dim_indicator.aggregation_method.
+      - name: is_complete
+        description: True when every country in the group contributed (no missing inputs).
+
+  - name: rpt_source_revisions
+    description: "Extra - every source correction / late-arriving value observed between runs, from the SCD2 snapshot."
