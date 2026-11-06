@@ -4,7 +4,7 @@ model Model
 	discourageImplicitMeasures
 	sourceQueryCulture: en-US
 
-annotation PBI_QueryOrder = ["DataFolder","WbCsv","dim_country","dim_indicator","dim_year","fct_indicator_value"]
+annotation PBI_QueryOrder = ["DataFolder","dim_country","dim_indicator","dim_year","fct_indicator_value"]
 
 ref table dim_country
 ref table dim_indicator

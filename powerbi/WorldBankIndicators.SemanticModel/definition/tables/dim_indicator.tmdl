@@ -79,8 +79,12 @@ table dim_indicator
 		mode: import
 		source =
 				let
-				    Source = WbCsv("dim_indicator.csv"),
-				    Typed = Table.TransformColumnTypes(Source, {{"valid_min", type number}, {"valid_max", type number}, {"sort_order", Int64.Type}}, "en-US")
+				    FileName = "dim_indicator.csv",
+				    Raw = if Text.StartsWith(DataFolder, "http") then Web.Contents(DataFolder & FileName) else File.Contents(DataFolder & FileName),
+				    Parsed = Csv.Document(Raw, [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+				    Promoted = Table.PromoteHeaders(Parsed, [PromoteAllScalars = true]),
+				    Blanks = Table.ReplaceValue(Promoted, "", null, Replacer.ReplaceValue, Table.ColumnNames(Promoted)),
+				    Typed = Table.TransformColumnTypes(Blanks, {{"valid_min", type number}, {"valid_max", type number}, {"sort_order", Int64.Type}}, "en-US")
 				in
 				    Typed
 

@@ -3,26 +3,26 @@ table fct_indicator_value
 
 	/// Value of the selected indicator, aggregated with its configured rule: sum (population, GDP), ratio of sums (GDP per capita = sum GDP / sum population) or population-weighted mean (life expectancy). Only country-years with every input present contribute. Blank when more than one indicator is in context - values of different indicators are never added up.
 	measure 'Indicator Value' =
-			VAR method = SELECTEDVALUE ( dim_indicator[aggregation_method] )
-			VAR numCode = SELECTEDVALUE ( dim_indicator[numerator_code] )
-			VAR denCode = SELECTEDVALUE ( dim_indicator[denominator_code] )
-			VAR wCode = SELECTEDVALUE ( dim_indicator[weight_code] )
-			VAR cells =
+			VAR _method = SELECTEDVALUE ( dim_indicator[aggregation_method] )
+			VAR _numCode = SELECTEDVALUE ( dim_indicator[numerator_code] )
+			VAR _denCode = SELECTEDVALUE ( dim_indicator[denominator_code] )
+			VAR _weightCode = SELECTEDVALUE ( dim_indicator[weight_code] )
+			VAR _grid =
 			    ADDCOLUMNS (
 			        CROSSJOIN ( VALUES ( dim_country[country_iso3] ), VALUES ( dim_year[year] ) ),
 			        "@v", CALCULATE ( SUM ( fct_indicator_value[value] ) ),
-			        "@num", IF ( method = "ratio", CALCULATE ( SUM ( fct_indicator_value[value] ), REMOVEFILTERS ( dim_indicator ), dim_indicator[indicator_code] = numCode ) ),
-			        "@den", IF ( method = "ratio", CALCULATE ( SUM ( fct_indicator_value[value] ), REMOVEFILTERS ( dim_indicator ), dim_indicator[indicator_code] = denCode ) ),
-			        "@w", IF ( method = "weighted_avg", CALCULATE ( SUM ( fct_indicator_value[value] ), REMOVEFILTERS ( dim_indicator ), dim_indicator[indicator_code] = wCode ) )
+			        "@num", IF ( _method = "ratio", CALCULATE ( SUM ( fct_indicator_value[value] ), REMOVEFILTERS ( dim_indicator ), dim_indicator[indicator_code] = _numCode ) ),
+			        "@den", IF ( _method = "ratio", CALCULATE ( SUM ( fct_indicator_value[value] ), REMOVEFILTERS ( dim_indicator ), dim_indicator[indicator_code] = _denCode ) ),
+			        "@w", IF ( _method = "weighted_avg", CALCULATE ( SUM ( fct_indicator_value[value] ), REMOVEFILTERS ( dim_indicator ), dim_indicator[indicator_code] = _weightCode ) )
 			    )
-			VAR ratioCells = FILTER ( cells, NOT ISBLANK ( [@num] ) && NOT ISBLANK ( [@den] ) && [@den] <> 0 )
-			VAR weightedCells = FILTER ( cells, NOT ISBLANK ( [@v] ) && NOT ISBLANK ( [@w] ) && [@w] > 0 )
+			VAR _ratioRows = FILTER ( _grid, NOT ISBLANK ( [@num] ) && NOT ISBLANK ( [@den] ) && [@den] <> 0 )
+			VAR _weightedRows = FILTER ( _grid, NOT ISBLANK ( [@v] ) && NOT ISBLANK ( [@w] ) && [@w] > 0 )
 			RETURN
 			    SWITCH (
-			        method,
-			        "sum", SUMX ( cells, [@v] ),
-			        "ratio", DIVIDE ( SUMX ( ratioCells, [@num] ), SUMX ( ratioCells, [@den] ) ),
-			        "weighted_avg", DIVIDE ( SUMX ( weightedCells, [@v] * [@w] ), SUMX ( weightedCells, [@w] ) )
+			        _method,
+			        "sum", SUMX ( _grid, [@v] ),
+			        "ratio", DIVIDE ( SUMX ( _ratioRows, [@num] ), SUMX ( _ratioRows, [@den] ) ),
+			        "weighted_avg", DIVIDE ( SUMX ( _weightedRows, [@v] * [@w] ), SUMX ( _weightedRows, [@w] ) )
 			    )
 		formatString: #,0.00
 		displayFolder: Indicators
@@ -34,11 +34,11 @@ table fct_indicator_value
 
 	/// Strict year-over-year change vs year - 1 of [Indicator Value]. Blank when either year is missing or the prior value is 0.
 	measure 'YoY %' =
-			VAR y = SELECTEDVALUE ( dim_year[year] )
-			VAR cur = [Indicator Value]
-			VAR prev = CALCULATE ( [Indicator Value], dim_year[year] = y - 1 )
+			VAR _year = SELECTEDVALUE ( dim_year[year] )
+			VAR _current = [Indicator Value]
+			VAR _prior = CALCULATE ( [Indicator Value], dim_year[year] = _year - 1 )
 			RETURN
-			    IF ( NOT ISBLANK ( y ) && NOT ISBLANK ( cur ) && NOT ISBLANK ( prev ) && prev <> 0, DIVIDE ( cur - prev, ABS ( prev ) ) )
+			    IF ( NOT ISBLANK ( _year ) && NOT ISBLANK ( _current ) && NOT ISBLANK ( _prior ) && _prior <> 0, DIVIDE ( _current - _prior, ABS ( _prior ) ) )
 		formatString: 0.0%
 		displayFolder: Indicators
 
@@ -132,8 +132,12 @@ table fct_indicator_value
 		mode: import
 		source =
 				let
-				    Source = WbCsv("fct_indicator_value.csv"),
-				    Typed = Table.TransformColumnTypes(Source, {{"year", Int64.Type}, {"value", type number}, {"is_missing", type logical}}, "en-US")
+				    FileName = "fct_indicator_value.csv",
+				    Raw = if Text.StartsWith(DataFolder, "http") then Web.Contents(DataFolder & FileName) else File.Contents(DataFolder & FileName),
+				    Parsed = Csv.Document(Raw, [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+				    Promoted = Table.PromoteHeaders(Parsed, [PromoteAllScalars = true]),
+				    Blanks = Table.ReplaceValue(Promoted, "", null, Replacer.ReplaceValue, Table.ColumnNames(Promoted)),
+				    Typed = Table.TransformColumnTypes(Blanks, {{"year", Int64.Type}, {"value", type number}, {"is_missing", type logical}}, "en-US")
 				in
 				    Typed
 

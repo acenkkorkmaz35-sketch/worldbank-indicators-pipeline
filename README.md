@@ -41,7 +41,7 @@ DuckDB client.
 The same entry point runs everything else. No virtualenv activation is needed:
 
 ```bash
-python run.py test        # 47 offline tests (all network access is blocked in tests)
+python run.py test        # 49 offline tests (all network access is blocked in tests)
 python run.py lint        # ruff check + format check
 python run.py ingest      # API -> raw only
 python run.py transform   # rebuild everything from raw, no API calls (replay)
@@ -93,7 +93,7 @@ docker run --rm -v "${PWD}/output:/app/output" wb-pipeline
 | README: setup, assumptions, trade-offs, walkthrough, AI usage | this file | — |
 | Sample output | [`output/`](output/) (CSV + `_manifest.json` + `dq_test_results.csv`) | — |
 | Git repo with history | one commit per milestone | `git log` |
-| *Optional:* extra view / dashboard / Power BI | `rpt_source_revisions`; Power BI project in [`powerbi/`](powerbi/) | `test_powerbi_model.py` (model ↔ export contract) |
+| *Optional:* extra view / dashboard / Power BI | `rpt_source_revisions`; Power BI project in [`powerbi/`](powerbi/) | `test_powerbi_model.py` (model ↔ export contract); verified in Power BI Desktop with `powerbi/verify_model.ps1` (112/112 and 252/252 values match SQL) |
 
 ---
 
@@ -306,7 +306,7 @@ then no CSVs are exported.
 
 The outcome of each test is exported to [`output/dq_test_results.csv`](output/dq_test_results.csv).
 
-**pytest (47 tests, offline).**
+**pytest (49 tests, offline).**
 [`tests/fake_api.py`](tests/fake_api.py) is an in-memory World Bank API that uses the real wire
 format. It honours `per_page`/`page` and can script failures. An autouse fixture blocks every outbound socket, so a test that tried to reach the internet would fail.
 
@@ -316,7 +316,7 @@ format. It honours `per_page`/`page` and can script failures. An autouse fixture
 | `test_config.py` | validation of codes, year ranges, aggregation references, unknown keys |
 | `test_ingest.py` | unchanged rerun stores no new payloads; a revision is stored as a new version; a failed run leaves no partial request and is recorded |
 | `test_cli.py` | exit codes (0 ok / 1 DQ / 2 usage / 3 source); unreachable source → run recorded as failed, nothing published |
-| `test_powerbi_model.py` | Power BI model ↔ export contract: every model column exists in the exported CSV (same order), relationships hit real columns, measures reference only model objects, project JSON is valid, TMDL uses tabs |
+| `test_powerbi_model.py` | Power BI model ↔ export contract: every model column exists in the exported CSV (same order), relationships hit real columns, measures reference only model objects, project JSON is valid, TMDL uses tabs; regressions for the two Desktop-only issues (reserved DAX variable names, shared M function) |
 | `test_pipeline_e2e.py` (runs real dbt against a temp DuckDB) | **idempotent rerun (zero rows touched)**; null vs not-returned semantics; zero prior → NULL pct; **late value + revision → MERGE touches exactly 2 rows, snapshot and revisions report capture both**; value withdrawn → `not_returned_by_source` + audited; no resurrection after a scope change; inconsistent GDP per capita, out-of-range values and a tampered raw payload **fail the build**; component gap → warning; add/remove a country and add an indicator via config; CSV export + manifest + lineage |
 
 ---
@@ -385,6 +385,27 @@ filter on one `dim_indicator[short_name]`, and add `Indicator Value`. The number
 `output/rpt_income_group_by_year.csv`. For example, GDP per capita in 2024: HIC 67,076.91,
 UMC 10,857.25, LMC 2,591.99; all selected countries 20,795.23, against a `Simple Average` of
 35,287.25.
+
+**How it was verified.** The project was opened in Power BI Desktop (September 2026 release).
+[`powerbi/verify_model.ps1`](powerbi/verify_model.ps1) then connected to Desktop's local
+Analysis Services engine, the same way DAX Studio and Tabular Editor do, and checked:
+- **Load:** all 4 tables loaded (9 / 4 / 7 / 252 rows), with no load or measure errors.
+- **`Indicator Value` and `Simple Average`:** match `rpt_income_group_by_year` for
+  **112/112** income group × indicator × year values.
+- **`YoY %` and country values:** match `rpt_yoy_change` for **252/252** values.
+- **Indicator guard:** `Indicator Value` is blank when several indicators are in context.
+
+To repeat the check, open the `.pbip`, then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File powerbi\verify_model.ps1
+```
+
+Two issues that only Desktop could reveal were found and fixed this way, and both are now
+regression tests in `test_powerbi_model.py`:
+- `cells` is reserved in DAX, so all DAX variables now use the `_name` convention.
+- A shared M helper function caused a cyclic-reference error, so each table query now reads
+  its own CSV.
 
 ---
 
@@ -572,5 +593,5 @@ dbt/snapshots/             snap_indicator_value (SCD2)
 dbt/tests/                 singular data-quality tests
 tests/                     pytest suite + fake World Bank API
 output/                    sample CSV outputs, DQ results, manifest; output/powerbi/ = star schema for BI
-powerbi/                   Power BI Project: TMDL semantic model (tables, relationships, measures)
+powerbi/                   Power BI Project: TMDL semantic model (tables, relationships, measures) + verify_model.ps1
 ```

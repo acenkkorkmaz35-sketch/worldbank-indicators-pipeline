@@ -72,8 +72,12 @@ table dim_country
 		mode: import
 		source =
 				let
-				    Source = WbCsv("dim_country.csv"),
-				    Typed = Table.TransformColumnTypes(Source, {{"longitude", type number}, {"latitude", type number}, {"sort_order", Int64.Type}}, "en-US")
+				    FileName = "dim_country.csv",
+				    Raw = if Text.StartsWith(DataFolder, "http") then Web.Contents(DataFolder & FileName) else File.Contents(DataFolder & FileName),
+				    Parsed = Csv.Document(Raw, [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+				    Promoted = Table.PromoteHeaders(Parsed, [PromoteAllScalars = true]),
+				    Blanks = Table.ReplaceValue(Promoted, "", null, Replacer.ReplaceValue, Table.ColumnNames(Promoted)),
+				    Typed = Table.TransformColumnTypes(Blanks, {{"longitude", type number}, {"latitude", type number}, {"sort_order", Int64.Type}}, "en-US")
 				in
 				    Typed
 

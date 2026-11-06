@@ -33,7 +33,7 @@ def tmdl_tables() -> dict[str, dict]:
             "columns": re.findall(r"^\tcolumn (\w+)$", text, re.M),
             "source_columns": re.findall(r"^\t\tsourceColumn: (\w+)$", text, re.M),
             "measures": re.findall(r"^\tmeasure '?([^'=]+?)'? =", text, re.M),
-            "csv": re.findall(r'WbCsv\("([\w.]+)"\)', text),
+            "csv": re.findall(r'FileName = "([\w.]+)"', text),
             "text": text,
         }
     return tables
@@ -72,11 +72,28 @@ def test_measures_reference_only_model_objects():
     measures = {m for t in tables.values() for m in t["measures"]}
     assert {"Indicator Value", "YoY %", "Completeness %"} <= measures
     columns = {(t, c) for t, spec in tables.items() for c in spec["columns"]}
-    text = tables["fct_indicator_value"]["text"]
+    # DAX only: measures precede the first column; the partition below holds M, not DAX
+    text = tables["fct_indicator_value"]["text"].split("\n\tcolumn ")[0]
     for table, column in re.findall(r"\b(dim_\w+|fct_\w+)\[(\w+)\]", text):
         assert (table, column) in columns, f"{table}[{column}] is not a model column"
     for ref in re.findall(r"(?<![\w\]])\[([^\]@]+)\]", text):
         assert ref in measures or any(ref == c for _, c in columns), f"[{ref}] is not a measure"
+
+
+def test_dax_variables_use_underscore_prefix():
+    # Regression: `VAR cells = ...` failed in Power BI Desktop ("The syntax for 'cells' is
+    # incorrect") - some plain words are reserved in DAX. The _prefix convention avoids them.
+    text = tmdl_tables()["fct_indicator_value"]["text"]
+    variables = re.findall(r"\bVAR (\w+)", text)
+    assert variables, "expected DAX variables in the measures"
+    assert all(v.startswith("_") for v in variables), [v for v in variables if not v.startswith("_")]
+
+
+def test_table_queries_are_self_contained():
+    # Regression: a shared helper function queried by every table hit "A cyclic reference was
+    # encountered during evaluation" in Power BI Desktop. Each partition now reads its own CSV.
+    expressions = (DEF / "expressions.tmdl").read_text(encoding="utf-8")
+    assert re.findall(r"^expression (\w+)", expressions, re.M) == ["DataFolder"]
 
 
 def test_project_files_are_valid_json():

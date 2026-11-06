@@ -11,8 +11,12 @@ table dim_year
 		mode: import
 		source =
 				let
-				    Source = WbCsv("dim_year.csv"),
-				    Typed = Table.TransformColumnTypes(Source, {{"year", Int64.Type}}, "en-US")
+				    FileName = "dim_year.csv",
+				    Raw = if Text.StartsWith(DataFolder, "http") then Web.Contents(DataFolder & FileName) else File.Contents(DataFolder & FileName),
+				    Parsed = Csv.Document(Raw, [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+				    Promoted = Table.PromoteHeaders(Parsed, [PromoteAllScalars = true]),
+				    Blanks = Table.ReplaceValue(Promoted, "", null, Replacer.ReplaceValue, Table.ColumnNames(Promoted)),
+				    Typed = Table.TransformColumnTypes(Blanks, {{"year", Int64.Type}}, "en-US")
 				in
 				    Typed
 
