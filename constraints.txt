@@ -1,4 +1,6 @@
-# Exact versions the pipeline was developed and tested with (Python 3.12).
+# Exact versions the pipeline is developed and tested with (CI: Python 3.11-3.14).
+# networkx and mashumaro are pinned below the newest releases on purpose: networkx 3.7 dropped
+# Python 3.11, and mashumaro needed a newer release than the original pin to import on Python 3.14.
 # Installed by `python run.py` (and by the Dockerfile and CI) via: pip install -e ".[dev]" -c constraints.txt
 agate==1.9.1
 annotated-types==0.8.0
@@ -28,11 +30,11 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 leather==0.4.1
 MarkupSafe==3.0.4
-mashumaro==3.14
+mashumaro==3.17
 metricflow==0.213.0
 more-itertools==10.8.0
 msgpack==1.2.4
-networkx==3.7
+networkx==3.6.1
 opentelemetry-api==1.45.2
 orderly-set==5.5.0
 packaging==26.3
