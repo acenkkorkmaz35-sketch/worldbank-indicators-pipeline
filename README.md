@@ -8,14 +8,15 @@ reporting layer with automated data-quality checks.
 **Scope (config):** BRA, CAN, DEU, GBR, IND, JPN, MEX, USA, ZAF ×
 `SP.POP.TOTL`, `NY.GDP.MKTP.CD`, `NY.GDP.PCAP.CD`, `SP.DYN.LE00.IN` × 2018–2024.
 
-**Stack:** Python 3.11+ (ingestion, CLI; developed and tested on 3.12) · DuckDB (local warehouse) · dbt-core 1.12 + dbt-duckdb (models, snapshots, tests) · pytest.
+**Stack:** Python 3.11–3.14 (ingestion, CLI; all four tested in CI) · DuckDB (local warehouse) · dbt-core 1.12 + dbt-duckdb (models, snapshots, tests) · pytest.
 No cloud resources, accounts or API keys.
 
 ---
 
 ## Quickstart
 
-**Prerequisites:** Python 3.11+ (tested with 3.12) and internet access to `api.worldbank.org`.
+**Prerequisites:** Python 3.11, 3.12, 3.13 or 3.14 (all tested in CI), and internet access to
+`api.worldbank.org`.
 Nothing else: no Docker, `make`, accounts or API keys.
 
 From a clean checkout, run **one command**, the same on Windows, macOS and Linux:
@@ -65,7 +66,7 @@ docker run --rm -v "${PWD}/output:/app/output" wb-pipeline
 > CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) repeats it on every push:
 > - `python run.py` from a clean checkout on Ubuntu, macOS and Windows, against the live API,
 >   followed by an idempotency re-run
-> - `python run.py lint` and `python run.py test`
+> - `python run.py lint` and `python run.py test` on Python 3.11, 3.12, 3.13 and 3.14
 > - the Docker build and the tests inside the container. Docker was not available on the
 >   development machine, so CI is where the Docker path is verified.
 
@@ -563,6 +564,15 @@ The working principle was: **don't trust, verify**:
   - a plausibility check was hard-coded to population instead of read from config
   - `duckdb` 2.x needs Python 3.11 while the package claimed 3.10
   - dependency versions were not pinned
+- A second pass, done the same way just before submission, found and fixed:
+  - the README documented `transform --full-refresh`, but the CLI rejected the flag
+  - an indicator with no data at all disappeared from the latest-year comparison instead of
+    showing as missing
+  - CLI exit codes 0 and 1 were not tested
+  - the pinned dependencies did not install on Python 3.11 (networkx) and did not import on
+    3.14 (mashumaro); a new CI matrix over 3.11–3.14 caught both
+- The Power BI model was checked inside Power BI Desktop's own engine (see
+  [Power BI model](#power-bi-model-optional-extra)).
 
 ---
 
