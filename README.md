@@ -41,7 +41,7 @@ DuckDB client.
 The same entry point runs everything else. No virtualenv activation is needed:
 
 ```bash
-python run.py test        # 38 offline tests (all network access is blocked in tests)
+python run.py test        # 47 offline tests (all network access is blocked in tests)
 python run.py lint        # ruff check + format check
 python run.py ingest      # API -> raw only
 python run.py transform   # rebuild everything from raw, no API calls (replay)
@@ -93,6 +93,7 @@ docker run --rm -v "${PWD}/output:/app/output" wb-pipeline
 | README: setup, assumptions, trade-offs, walkthrough, AI usage | this file | — |
 | Sample output | [`output/`](output/) (CSV + `_manifest.json` + `dq_test_results.csv`) | — |
 | Git repo with history | one commit per milestone | `git log` |
+| *Optional:* extra view / dashboard / Power BI | `rpt_source_revisions`; Power BI project in [`powerbi/`](powerbi/) | `test_powerbi_model.py` (model ↔ export contract) |
 
 ---
 
@@ -305,7 +306,7 @@ then no CSVs are exported.
 
 The outcome of each test is exported to [`output/dq_test_results.csv`](output/dq_test_results.csv).
 
-**pytest (38 tests, offline).**
+**pytest (47 tests, offline).**
 [`tests/fake_api.py`](tests/fake_api.py) is an in-memory World Bank API that uses the real wire
 format. It honours `per_page`/`page` and can script failures. An autouse fixture blocks every outbound socket, so a test that tried to reach the internet would fail.
 
@@ -315,6 +316,7 @@ format. It honours `per_page`/`page` and can script failures. An autouse fixture
 | `test_config.py` | validation of codes, year ranges, aggregation references, unknown keys |
 | `test_ingest.py` | unchanged rerun stores no new payloads; a revision is stored as a new version; a failed run leaves no partial request and is recorded |
 | `test_cli.py` | exit codes (0 ok / 1 DQ / 2 usage / 3 source); unreachable source → run recorded as failed, nothing published |
+| `test_powerbi_model.py` | Power BI model ↔ export contract: every model column exists in the exported CSV (same order), relationships hit real columns, measures reference only model objects, project JSON is valid, TMDL uses tabs |
 | `test_pipeline_e2e.py` (runs real dbt against a temp DuckDB) | **idempotent rerun (zero rows touched)**; null vs not-returned semantics; zero prior → NULL pct; **late value + revision → MERGE touches exactly 2 rows, snapshot and revisions report capture both**; value withdrawn → `not_returned_by_source` + audited; no resurrection after a scope change; inconsistent GDP per capita, out-of-range values and a tampered raw payload **fail the build**; component gap → warning; add/remove a country and add an indicator via config; CSV export + manifest + lineage |
 
 ---
@@ -335,6 +337,54 @@ The current World Bank release is **complete** for this scope (all 252 combinati
 value). So `rpt_missing_data.csv` and `rpt_source_revisions.csv` contain only headers, and every
 series in `rpt_coverage_summary.csv` is `complete`. These are real results, not a bug: missing,
 late and revised data are exercised by the e2e tests with controlled fixtures.
+
+---
+
+## Power BI model (optional extra)
+
+[`powerbi/WorldBankIndicators.pbip`](powerbi/) is a Power BI Project. The semantic model is
+stored as code in TMDL, so it is reviewable and diffable like the rest of the repo.
+
+**Model:** a star schema, with the same grain and keys as the warehouse.
+
+```mermaid
+erDiagram
+    dim_country ||--o{ fct_indicator_value : country_iso3
+    dim_indicator ||--o{ fct_indicator_value : indicator_code
+    dim_year ||--o{ fct_indicator_value : year
+```
+
+- `python run.py` exports the tables to [`output/powerbi/`](output/powerbi/): `dim_country`,
+  `dim_indicator`, `dim_year` and `fct_indicator_value`.
+- Relationships are many-to-one and single-direction.
+- Foreign keys and raw values are hidden, so report authors use the dimensions and measures.
+- Implicit measures are disabled, so summing values of different indicators by accident is not
+  possible.
+- Lineage columns (`source_response_id`, `source_request_url`, `source_last_updated`) stay
+  visible for drill-through.
+
+**Measures:**
+
+| Measure | Logic |
+|---|---|
+| `Indicator Value` | Uses the indicator's configured rule, the same as `rpt_income_group_by_year`: sum (population, GDP), Σ GDP / Σ population (GDP per capita), or population-weighted mean (life expectancy). Only country-years with every input present contribute. Blank if several indicators are in context. |
+| `Simple Average` | Plain average of country values, to show the difference from a correct aggregate. |
+| `YoY %` | Strict change vs `year − 1`. Blank when either year is missing or the prior value is 0. |
+| `Countries Reporting`, `Missing Combinations`, `Completeness %`, `Latest Year With Data` | Coverage and missing data (Q1). |
+
+**Data source:** the `DataFolder` parameter. Its default is the sample CSVs in this public
+repo, so the model opens without running the pipeline. After a local run, point it at your
+`output/powerbi/` folder (**Transform data → Edit parameters**, keep the trailing slash).
+
+**To open:** use Power BI Desktop (Windows, free).
+1. Open `powerbi/WorldBankIndicators.pbip`.
+2. Click **Refresh**. If asked about access to `raw.githubusercontent.com`, choose **Anonymous**.
+
+**Checking the measures:** put `dim_country[income_group_name]` and `dim_year[year]` in a matrix,
+filter on one `dim_indicator[short_name]`, and add `Indicator Value`. The numbers should match
+`output/rpt_income_group_by_year.csv`. For example, GDP per capita in 2024: HIC 67,076.91,
+UMC 10,857.25, LMC 2,591.99; all selected countries 20,795.23, against a `Simple Average` of
+35,287.25.
 
 ---
 
@@ -480,16 +530,31 @@ The working principle was: **don't trust, verify**:
 
 ---
 
-## Unfinished work / next steps
+## Possible next phases
 
-- `lastupdated` probe for incremental fetches (designed above, not implemented). Every run
-  currently re-fetches the full scope (9 small requests).
-- Write-audit-publish swap and source-freshness checks.
-- A `--as-of-run` replay flag (the data needed for it is already in `raw.api_fetch_log`).
-- Historical income classifications (OGHIST) to make income-group trends era-correct.
-- Power BI model on top of `core` (optional in the brief; not started).
-- A partial-refresh mode (per-indicator fetch) would need staging to select payloads per request
+Every requirement in the brief is implemented. The items below go beyond its scope. They are
+natural next steps if this ran in production; the production design note above already
+describes how each would work.
+
+**Operations**
+- **Incremental fetch:** make a cheap `lastupdated` probe per indicator and re-fetch only the
+  indicators that changed. Today every run re-fetches the full scope (9 small requests);
+  idempotency makes that safe but not minimal.
+- **Partial refresh per indicator:** this would require staging to select payloads per request
   instead of per run.
+- **Write-audit-publish:** build into an audit schema and swap only when the error tests pass.
+  Today a failing test already blocks the CSV export.
+- **Source-freshness SLA checks** with alerting.
+- **`--as-of-run` replay flag:** rebuild the warehouse as it was after a given run. The data for
+  this is already in `raw.api_fetch_log`. A full replay from raw already works today with
+  `python run.py transform`.
+
+**Analytics**
+- **Historical income classifications** (World Bank OGHIST), to make income-group trends
+  era-correct. This is deliberately out of scope: OGHIST is a separate file, not part of the
+  API, and the brief allows only the API as the data source.
+- **Power BI report pages** on top of the semantic model. The model and its measures are
+  included; the report pages are left for report authors.
 
 ## Repository layout
 
@@ -506,5 +571,6 @@ dbt/models/reporting/      rpt_* views (+ _reporting.yml)
 dbt/snapshots/             snap_indicator_value (SCD2)
 dbt/tests/                 singular data-quality tests
 tests/                     pytest suite + fake World Bank API
-output/                    sample CSV outputs and DQ results
+output/                    sample CSV outputs, DQ results, manifest; output/powerbi/ = star schema for BI
+powerbi/                   Power BI Project: TMDL semantic model (tables, relationships, measures)
 ```
