@@ -1,5 +1,5 @@
 # Exact versions the pipeline was developed and tested with (Python 3.12).
-# Installed via: pip install -e ".[dev]" -c constraints.txt   (make run / run.ps1 / Docker / CI do this)
+# Installed by `python run.py` (and by the Dockerfile and CI) via: pip install -e ".[dev]" -c constraints.txt
 agate==1.9.1
 annotated-types==0.8.0
 attrs==26.1.0

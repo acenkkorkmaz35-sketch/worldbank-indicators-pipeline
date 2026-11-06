@@ -15,37 +15,55 @@ No cloud resources, accounts or API keys.
 
 ## Quickstart
 
-Run from a clean checkout. Python 3.11+ must be on your PATH (on Debian/Ubuntu also `python3-venv`). Each of these commands creates `.venv`, installs the package with the exact tested dependency versions (`constraints.txt`) and runs the whole pipeline:
+**Prerequisites:** Python 3.11+ (tested with 3.12) and internet access to `api.worldbank.org`.
+Nothing else: no Docker, `make`, accounts or API keys.
 
-| Platform | Command |
-|---|---|
-| macOS / Linux | `make run` |
-| Windows (PowerShell) | `.\run.ps1` |
-| Docker | `docker build -t wb-pipeline . && docker run --rm -v "$PWD/output:/app/output" wb-pipeline` |
-
-`run` does three things in order:
-
-1. **ingest:** API → `raw.*`
-2. **dbt build:** staging → core → snapshot → reporting, plus all data-quality tests
-3. **export:** CSVs in [`output/`](output/)
-
-The warehouse is the file `data/warehouse.duckdb`. You can query it with the DuckDB CLI or any DuckDB client.
+From a clean checkout, run **one command**, the same on Windows, macOS and Linux:
 
 ```bash
-make test                     # or .\run.ps1 test   -> 38 tests, network access blocked
-make lint                     # ruff check + format check
-wb-pipeline ingest            # API -> raw only
-wb-pipeline transform         # rebuild everything from raw, no API calls (replay)
-wb-pipeline export            # reporting views -> CSV
-make docs                     # dbt docs + lineage graph in the browser
+python run.py
 ```
 
-> **How each path was verified.** On the Windows development machine, `.\run.ps1` and
-> `.\run.ps1 test` were run from a fresh `git clone`. Docker and `make` are not available there.
-> Instead, CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on Linux on every push:
-> - `make run` against the live API, plus an idempotency re-run
-> - `docker build` + the test suite inside the container
-> - lint + the offline tests
+Use `python3 run.py` if `python` on your system is not Python 3.
+
+On the first run, `run.py` creates `.venv` and installs the package with the exact tested
+dependency versions from `constraints.txt`. It uses only the Python standard library. Then it
+runs the pipeline:
+
+1. **ingest:** API → `raw.*`
+2. **dbt build:** staging → core → snapshot → reporting, plus all 65 data-quality tests
+3. **export:** CSVs and `_manifest.json` in [`output/`](output/)
+
+Running it again is safe. Unchanged source data creates no new payloads and changes no rows.
+The warehouse is the file `data/warehouse.duckdb`; you can query it with the DuckDB CLI or any
+DuckDB client.
+
+The same entry point runs everything else. No virtualenv activation is needed:
+
+```bash
+python run.py test        # 38 offline tests (all network access is blocked in tests)
+python run.py lint        # ruff check + format check
+python run.py ingest      # API -> raw only
+python run.py transform   # rebuild everything from raw, no API calls (replay)
+python run.py export      # reporting views -> CSV
+python run.py docs        # dbt docs + lineage graph on http://localhost:8080
+```
+
+**Optional: Docker**, if you prefer not to use a local Python:
+
+```bash
+docker build -t wb-pipeline .
+docker run --rm -v "${PWD}/output:/app/output" wb-pipeline
+```
+
+> **How this was verified.** `python run.py` and `python run.py test` were run from a fresh
+> `git clone` on Windows 11 with Python 3.12, following this section literally.
+> CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) repeats it on every push:
+> - `python run.py` from a clean checkout on Ubuntu, macOS and Windows, against the live API,
+>   followed by an idempotency re-run
+> - `python run.py lint` and `python run.py test`
+> - the Docker build and the tests inside the container. Docker was not available on the
+>   development machine, so CI is where the Docker path is verified.
 
 ---
 
@@ -57,7 +75,8 @@ make docs                     # dbt docs + lineage graph in the browser
 | Paging | `_fetch_all_pages`: follows `meta.pages`, checks rows = `meta.total`, rejects metadata changing mid-request | `test_paging_collects_every_page` (5 pages); verified live with `per_page=20` (4 pages, 63 unique rows) |
 | API failures | retries with backoff for timeouts, 429/5xx and non-JSON; HTTP-200 error envelopes; 4xx fail fast; atomic per-request writes; failed runs ignored downstream | 9 client tests, `test_failed_run_*`, `test_unreachable_source_fails_cleanly_*` |
 | Every output value traceable to its API response | `source_response_id` on fact **and on every reporting view**; `output/_manifest.json` ties CSVs to `run_id` + source `lastupdated` | DQ test `assert_values_traceable_to_raw_payload` re-parses the payload per value; `test_export_writes_manifest_*` |
-| Single documented command from a clean checkout | `make run` / `.\run.ps1` / Docker | clean-clone run (Windows); CI `make-run` + `docker` jobs (Linux) |
+| Single documented command from a clean checkout | `python run.py`, the same on every OS; Docker as an optional alternative | clean-clone run (Windows); CI runs it on Ubuntu, macOS and Windows, plus a `docker` job |
+| Any stack; runs locally by following the README | Python + DuckDB + dbt, all local; [Quickstart](#quickstart) is the only setup | the CI steps are the README commands, verbatim |
 | Re-run creates no duplicates | content-addressed raw + MERGE on business key, updating only changed rows | `test_full_build_then_rerun_is_idempotent` (0 rows touched); CI re-run check; live: 0 new payloads |
 | No cloud / paid / API accounts | public API only, local DuckDB file | dbt telemetry disabled; tests block all sockets |
 | Raw separate from clean and analytics data | schemas `raw` → `staging` → `core` → `reporting` | [Architecture](#architecture) |
@@ -165,7 +184,7 @@ indicator's unit, years are integers, codes are upper-case ISO3/WB codes, and a 
 inserted. If the source changed, a new row is added and the old payload is kept.
 `raw.api_fetch_log` records every fetch (run, request, page → response_id). The raw layer is
 therefore an append-only, de-duplicated audit trail. You can rebuild everything downstream from
-it without calling the API (`wb-pipeline transform`). Request URLs are built deterministically
+it without calling the API (`python run.py transform`). Request URLs are built deterministically
 (sorted parameters and country codes), so the same request always gets the same identity.
 
 **2. Every value is traceable to its API response.**
@@ -393,7 +412,7 @@ late and revised data are exercised by the e2e tests with controlled fixtures.
 
 **Backfills & replay-ability**
 - Raw is immutable and content-addressed, so any downstream state can be rebuilt without the
-  API: `wb-pipeline transform` (`--full-refresh` for core).
+  API: `python run.py transform` (`--full-refresh` for core).
 - **Backfilling years or countries is a config change**, followed by a run. The MERGE inserts
   the new keys only.
 - To reproduce a past report, rebuild from the payloads fetched up to a given `run_id` (the fetch
@@ -477,7 +496,9 @@ The working principle was: **don't trust, verify**:
 ```
 config/pipeline.yml        scope, source, quality settings (single source of truth)
 constraints.txt            exact dependency versions used for development and CI
-Makefile, run.ps1, Dockerfile, .github/workflows/ci.yml   run paths and CI
+run.py                     the single entry point (stdlib-only bootstrap: venv, pinned install, commands)
+Dockerfile                 optional containerised run
+.github/workflows/ci.yml   runs the README commands on Ubuntu, macOS and Windows, plus Docker
 src/wb_pipeline/           config.py · api_client.py · ingest.py · transform.py · export.py · cli.py
 dbt/models/staging/        sources + parsing of raw JSON
 dbt/models/core/           dim_country, dim_indicator, fct_indicator_value (+ _core.yml contracts)

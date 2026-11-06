@@ -1,4 +1,4 @@
-"""Command line entry point.
+"""Command line entry point (normally invoked as `python run.py <command>` from the repo root).
 
     wb-pipeline run        # ingest -> dbt build (models, snapshot, DQ tests) -> CSV export
     wb-pipeline ingest     # API -> raw layer only
@@ -35,7 +35,7 @@ class UsageError(RuntimeError):
 def _require_ingested(cfg: PipelineConfig) -> None:
     """transform/export need at least one successful ingestion in the warehouse."""
     if not cfg.warehouse_path.exists():
-        raise UsageError(f"no warehouse at {cfg.warehouse_path} - run `wb-pipeline ingest` (or `run`) first")
+        raise UsageError(f"no warehouse at {cfg.warehouse_path} - run `python run.py` first")
     con = duckdb.connect(str(cfg.warehouse_path))
     try:
         has_run = (
@@ -48,7 +48,7 @@ def _require_ingested(cfg: PipelineConfig) -> None:
     finally:
         con.close()
     if not has_run:
-        raise UsageError("no successful ingestion run in the warehouse - run `wb-pipeline ingest` first")
+        raise UsageError("no successful ingestion run in the warehouse - run `python run.py ingest` first")
 
 
 def _transform(cfg: PipelineConfig) -> bool:
