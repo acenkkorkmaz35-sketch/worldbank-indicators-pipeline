@@ -8,14 +8,14 @@ reporting layer with automated data-quality checks.
 **Scope (config):** BRA, CAN, DEU, GBR, IND, JPN, MEX, USA, ZAF ×
 `SP.POP.TOTL`, `NY.GDP.MKTP.CD`, `NY.GDP.PCAP.CD`, `SP.DYN.LE00.IN` × 2018–2024.
 
-**Stack:** Python 3.10+ (ingestion, CLI) · DuckDB (local warehouse) · dbt-core 1.12 + dbt-duckdb (models, snapshots, tests) · pytest.
+**Stack:** Python 3.11+ (ingestion, CLI; developed and tested on 3.12) · DuckDB (local warehouse) · dbt-core 1.12 + dbt-duckdb (models, snapshots, tests) · pytest.
 No cloud resources, accounts or API keys.
 
 ---
 
 ## Quickstart
 
-Run from a clean checkout. Python 3.10+ must be on your PATH. Each of these commands creates `.venv`, installs the package and runs the whole pipeline:
+Run from a clean checkout. Python 3.11+ must be on your PATH (on Debian/Ubuntu also `python3-venv`). Each of these commands creates `.venv`, installs the package with the exact tested dependency versions (`constraints.txt`) and runs the whole pipeline:
 
 | Platform | Command |
 |---|---|
@@ -32,15 +32,48 @@ Run from a clean checkout. Python 3.10+ must be on your PATH. Each of these comm
 The warehouse is the file `data/warehouse.duckdb`. You can query it with the DuckDB CLI or any DuckDB client.
 
 ```bash
-make test                     # or .\run.ps1 test   -> 30 tests, no network access needed
+make test                     # or .\run.ps1 test   -> 38 tests, network access blocked
+make lint                     # ruff check + format check
 wb-pipeline ingest            # API -> raw only
 wb-pipeline transform         # rebuild everything from raw, no API calls (replay)
 wb-pipeline export            # reporting views -> CSV
 make docs                     # dbt docs + lineage graph in the browser
 ```
 
-> The Dockerfile and `make` targets follow standard patterns, but they were not executed on the
-> development machine (Windows, no Docker). `run.ps1`, the CLI and the test suite were run there.
+> **How each path was verified.** On the Windows development machine, `.\run.ps1` and
+> `.\run.ps1 test` were run from a fresh `git clone`. Docker and `make` are not available there.
+> Instead, CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on Linux on every push:
+> - `make run` against the live API, plus an idempotency re-run
+> - `docker build` + the test suite inside the container
+> - lint + the offline tests
+
+---
+
+## Requirements checklist
+
+| Brief requirement | Where | Evidence |
+|---|---|---|
+| Country metadata + indicator observations | `api_client.py` (`fetch_countries`, `fetch_indicator_metadata`, `fetch_observations`) | live run: 9 requests |
+| Paging | `_fetch_all_pages`: follows `meta.pages`, checks rows = `meta.total`, rejects metadata changing mid-request | `test_paging_collects_every_page` (5 pages); verified live with `per_page=20` (4 pages, 63 unique rows) |
+| API failures | retries with backoff for timeouts, 429/5xx and non-JSON; HTTP-200 error envelopes; 4xx fail fast; atomic per-request writes; failed runs ignored downstream | 9 client tests, `test_failed_run_*`, `test_unreachable_source_fails_cleanly_*` |
+| Every output value traceable to its API response | `source_response_id` on fact **and on every reporting view**; `output/_manifest.json` ties CSVs to `run_id` + source `lastupdated` | DQ test `assert_values_traceable_to_raw_payload` re-parses the payload per value; `test_export_writes_manifest_*` |
+| Single documented command from a clean checkout | `make run` / `.\run.ps1` / Docker | clean-clone run (Windows); CI `make-run` + `docker` jobs (Linux) |
+| Re-run creates no duplicates | content-addressed raw + MERGE on business key, updating only changed rows | `test_full_build_then_rerun_is_idempotent` (0 rows touched); CI re-run check; live: 0 new payloads |
+| No cloud / paid / API accounts | public API only, local DuckDB file | dbt telemetry disabled; tests block all sockets |
+| Raw separate from clean and analytics data | schemas `raw` → `staging` → `core` → `reporting` | [Architecture](#architecture) |
+| Grain, keys, relationships documented | [Data model](#data-model), `_core.yml` | grain, unique-key, relationship and spine tests |
+| Standardised for analysts | typed, trimmed, ISO3 codes; long fact table plus dims; missing = `NULL` + reason | [Data model](#data-model) |
+| Add a country / indicator by config | `config/pipeline.yml` → `meta.scope_*` → every model and test | `test_adding_and_removing_a_country_is_config_only`, `test_adding_an_indicator_is_config_only` |
+| Q1 missing / incomplete | `rpt_missing_data`, `rpt_coverage_summary` | `test_missing_values_are_explicit_never_zero` |
+| Q2 YoY with missing / zero priors | `rpt_yoy_change` | `test_zero_prior_value_gives_null_pct_change` and the missing-data test |
+| Q3 latest-year comparison | `rpt_latest_year_comparison` | missing-data test (latest-any vs latest-complete) |
+| Q4 income groups by year | `rpt_income_group_by_year` | weighted aggregation asserted in `test_adding_an_indicator_*` |
+| Automated DQ checks; related indicators consistent | 65 dbt tests incl. ratio reconciliation and coverage | `test_inconsistent_related_indicators_fail_the_build`, `test_out_of_range_*`, `test_tampered_raw_payload_*` |
+| Tests run without the live API | `tests/fake_api.py`; autouse fixture blocks every socket | `test_unreachable_source_*` asserts the guard fired |
+| Production note | [Production design note](#production-design-note) | — |
+| README: setup, assumptions, trade-offs, walkthrough, AI usage | this file | — |
+| Sample output | [`output/`](output/) (CSV + `_manifest.json` + `dq_test_results.csv`) | — |
+| Git repo with history | one commit per milestone | `git log` |
 
 ---
 
@@ -140,6 +173,21 @@ Each fact row carries `source_response_id`, `source_request_url` (including the 
 `source_run_id`. The test `assert_values_traceable_to_raw_payload` re-parses the referenced raw
 payload and checks the value matches for every row, so lineage is verified, not just stored.
 
+The reporting views carry lineage too:
+- `rpt_yoy_change`: `source_response_id` and `prior_source_response_id`
+- `rpt_latest_year_comparison`: the response behind each compared value
+- `rpt_income_group_by_year`: `source_response_ids` of the inputs actually used
+- `rpt_missing_data`: the request URLs that were checked, as proof of absence
+
+`output/_manifest.json` records which ingestion run, config fingerprint and source `lastupdated`
+the CSVs were built from. To trace a number from any CSV back to the exact API response:
+
+```sql
+select r.request_url, r.source_last_updated, r.first_fetched_at, r.payload
+from raw.api_response r
+where r.response_id = '<source_response_id from the CSV>';
+```
+
 **3. Idempotency in two places.**
 - **Raw:** see point 1.
 - **Core:** `fct_indicator_value` is an incremental model that uses `MERGE` on the business key
@@ -149,10 +197,14 @@ payload and checks the value matches for every row, so lineage is verified, not 
   This is proven by tests, and was also checked against the live API (second run: 0 new
   payloads, 0 changed rows).
 
-**4. Atomic requests; failed runs are ignored downstream.**
-All pages of a logical request are written in one transaction. Staging reads only payloads from
-the latest *successful* run per request. A run that fails mid-way is recorded as `failed` with
-its error, and it can never mix half-new and half-old data into the model.
+**4. One consistent source snapshot; failed runs are ignored downstream.**
+All pages of a logical request are written in one transaction. Staging reads exactly the
+payloads of the latest *successful* run. Every run fetches the full scope, so:
+- GDP, population and GDP per capita always come from the same moment, which makes the
+  cross-indicator checks meaningful;
+- a run that fails mid-way (recorded as `failed` with its error) can never mix new and old data;
+- a value the source withdraws can never be resurrected from an older request (regression test
+  `test_scope_change_never_resurrects_values_from_older_requests`).
 
 **5. API failure handling.**
 - **Errors returned as HTTP 200:** the World Bank returns errors with HTTP 200 and an envelope
@@ -201,47 +253,50 @@ Only countries with every input present contribute, and `countries_contributing`
 **10. Adding a country or indicator is a config change only.**
 Edit `config/pipeline.yml`:
 - Add an ISO3 code under `countries`, or
-- Add an indicator block with `code`, `short_name`, `unit`, `aggregation` and an optional
-  `valid_range`.
+- Add an indicator block with `code`, `short_name`, `unit`, `aggregation`, and optionally
+  `valid_range` and `max_abs_yoy_change`.
 
 The ingestion mirrors the scope into `meta.scope_*` and every model, test and report picks it up.
 A new `ratio` indicator is automatically covered by the reconciliation test. Removing an item
-removes its rows from the fact table and closes them in the snapshot (covered by
-`test_adding_and_removing_a_country_is_config_only`).
+removes its rows from the fact table and closes them in the snapshot. This is covered by
+`test_adding_and_removing_a_country_is_config_only` and `test_adding_an_indicator_is_config_only`;
+the latter adds urban population % and checks its population-weighted income-group aggregate.
 
 ---
 
 ## Data quality & tests
 
-**dbt tests (53, run on every `dbt build`).** Tests with severity *error* stop the build, and
+**dbt tests (65, run on every `dbt build`).** Tests with severity *error* stop the build, and
 then no CSVs are exported.
 
 | Check | Type | Severity |
 |---|---|---|
 | PK unique / not null; FK relationships fact → dims; accepted values (reasons, statuses, income groups, aggregation methods) | generic | error |
-| Grain: unique (country, indicator, year) in fact and reports | generic | error |
+| Grain: unique keys in staging, fact and every report | generic | error |
+| **Raw integrity**: stored payload hashes to its `payload_sha256`; every successful run logged all pages of each request | singular | error |
 | **Spine completeness**: fact = scope countries × indicators × years, no more, no less | singular | error |
 | **Missing-flag semantics**: `is_missing ⇔ value is null ⇔ missing_reason is not null`, lineage consistent with the reason | singular | error |
 | **Traceability**: every value equals the value in the raw payload it points to | singular | error |
 | **Configured valid ranges** per indicator (catches unit/scale errors) | singular | error |
 | **Cross-indicator consistency**: every `ratio` indicator reconciles with its components (GDP per capita = GDP / population, tolerance 0.5%; the live data reconciles exactly) | singular | error |
 | Ratio indicator present while a component is missing (or vice versa) | singular | warn |
-| Population moving > 5% YoY | singular | warn |
+| YoY move larger than the indicator's configured `max_abs_yoy_change` (population 5%, life expectancy 10%) | singular | warn |
 | API returned rows outside the requested scope or non-annual periods | singular | warn |
 | Every scope country has metadata and an income group | generic | error |
 
 The outcome of each test is exported to [`output/dq_test_results.csv`](output/dq_test_results.csv).
 
-**pytest (30 tests, offline).**
+**pytest (38 tests, offline).**
 [`tests/fake_api.py`](tests/fake_api.py) is an in-memory World Bank API that uses the real wire
-format. It honours `per_page`/`page` and can script failures. No test calls the live API.
+format. It honours `per_page`/`page` and can script failures. An autouse fixture blocks every outbound socket, so a test that tried to reach the internet would fail.
 
 | Area | Proves |
 |---|---|
 | `test_api_client.py` | paging across 5 pages; deterministic URLs; HTTP-200 error envelopes; retry with exponential backoff; give-up after max retries; 4xx fail-fast; row-count reconciliation; paging metadata changing mid-request; empty results |
 | `test_config.py` | validation of codes, year ranges, aggregation references, unknown keys |
 | `test_ingest.py` | unchanged rerun stores no new payloads; a revision is stored as a new version; a failed run leaves no partial request and is recorded |
-| `test_pipeline_e2e.py` (runs real dbt against a temp DuckDB) | **idempotent rerun (zero rows touched)**; null vs not-returned semantics; zero prior → NULL pct; **late value + revision → MERGE touches exactly 2 rows, snapshot and revisions report capture both**; inconsistent GDP per capita and out-of-range values **fail the build**; component gap → warning; add/remove a country via config; CSV export |
+| `test_cli.py` | exit codes (0 ok / 1 DQ / 2 usage / 3 source); unreachable source → run recorded as failed, nothing published |
+| `test_pipeline_e2e.py` (runs real dbt against a temp DuckDB) | **idempotent rerun (zero rows touched)**; null vs not-returned semantics; zero prior → NULL pct; **late value + revision → MERGE touches exactly 2 rows, snapshot and revisions report capture both**; value withdrawn → `not_returned_by_source` + audited; no resurrection after a scope change; inconsistent GDP per capita, out-of-range values and a tampered raw payload **fail the build**; component gap → warning; add/remove a country and add an indicator via config; CSV export + manifest + lineage |
 
 ---
 
@@ -251,10 +306,10 @@ Sample outputs from a live run on 2026-11-06 (source `lastupdated` 2026-10-08) a
 
 | Question | View → CSV |
 |---|---|
-| Which country-indicator-year combinations are missing or incomplete? | `rpt_missing_data` (row level, with reason and gap type), `rpt_coverage_summary` (per series: completeness %, missing years, status) |
+| Which country-indicator-year combinations are missing or incomplete? | `rpt_missing_data` (each *missing* combination, with reason, gap type and the checked request), `rpt_coverage_summary` (each *incomplete* series: completeness %, missing years, status) |
 | Year-over-year change, handling missing/zero priors | `rpt_yoy_change` |
 | Country comparison for the latest available year | `rpt_latest_year_comparison` (rank, ratio to peer median, at latest-any and latest-complete year, plus each country's own latest) |
-| Indicators across income groups, by year | `rpt_income_group_by_year` (+ an "All selected countries" row) |
+| Indicators across income groups, by year | `rpt_income_group_by_year` (+ an "All selected countries" row and `ratio_to_all_selected`) |
 | *Extra:* source corrections / late data between runs | `rpt_source_revisions` |
 
 The current World Bank release is **complete** for this scope (all 252 combinations have a
@@ -268,6 +323,9 @@ late and revised data are exercised by the e2e tests with controlled fixtures.
 
 - **Income groups:** the API exposes only the *current* income classification, and it is applied
   to all years. Historical classifications (World Bank OGHIST file) are out of scope.
+- **"Missing" vs "incomplete":** a *missing* combination has no value: it was null in the
+  source or not returned. An *incomplete* series is a country × indicator with at least one
+  missing year in scope. Both are reported, at their own grain.
 - **"Latest available year":** interpreted in the two ways described in decision 8.
 - **YoY for 2018:** the first year in scope has no prior in scope (`no_prior_year_in_scope`). It
   is not fetched from 2017, so the dataset stays strictly within the requested years.
@@ -374,10 +432,18 @@ Design choices were discussed and steered explicitly; the job description's emph
 MERGE patterns, late data and testing shaped the scope. The principle was: **don't trust,
 verify**:
 - Every behavioural claim in this README is backed by a test or by a run against the live API.
-  Examples: zero-row reruns, exact GDP-per-capita reconciliation, 30 passing tests.
+  Examples: zero-row reruns, exact GDP-per-capita reconciliation, live paging.
 - Two real defects were caught this way during development:
   - an escaped newline in a SQL comment that broke the DDL
   - a test fake that mis-parsed `;` in URLs
+- A final self-review against the brief, done the way a reviewer would, found and fixed:
+  - staging could resurrect a withdrawn value from a request key that had become stale after a
+    scope change; now fixed and covered by a regression test
+  - dbt's anonymous telemetry made network calls; now disabled, and tests block sockets
+  - reporting CSVs lacked lineage columns
+  - a plausibility check was hard-coded to population instead of read from config
+  - `duckdb` 2.x needs Python 3.11 while the package claimed 3.10
+  - dependency versions were not pinned
 
 ---
 
@@ -389,12 +455,15 @@ verify**:
 - A `--as-of-run` replay flag (the data needed for it is already in `raw.api_fetch_log`).
 - Historical income classifications (OGHIST) to make income-group trends era-correct.
 - Power BI model on top of `core` (optional in the brief; not started).
-- CI is defined in `.github/workflows/ci.yml`, but it has not run until the repo is pushed.
+- A partial-refresh mode (per-indicator fetch) would need staging to select payloads per request
+  instead of per run.
 
 ## Repository layout
 
 ```
 config/pipeline.yml        scope, source, quality settings (single source of truth)
+constraints.txt            exact dependency versions used for development and CI
+Makefile, run.ps1, Dockerfile, .github/workflows/ci.yml   run paths and CI
 src/wb_pipeline/           config.py · api_client.py · ingest.py · transform.py · export.py · cli.py
 dbt/models/staging/        sources + parsing of raw JSON
 dbt/models/core/           dim_country, dim_indicator, fct_indicator_value (+ _core.yml contracts)

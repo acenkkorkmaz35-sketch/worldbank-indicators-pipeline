@@ -1,1 +1,1 @@
-country_iso3,country_name,income_group_name,indicator_code,indicator_short_name,year,missing_reason,gap_type,last_available_year,checked_request_url
+country_iso3,country_name,income_group_name,indicator_code,indicator_short_name,year,missing_reason,gap_type,last_available_year,source_response_id,checked_in_run_id,checked_request_urls
